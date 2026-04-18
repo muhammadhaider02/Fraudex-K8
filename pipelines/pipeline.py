@@ -1,5 +1,6 @@
 import kfp
 from kfp import dsl
+from kfp import kubernetes
 from kfp.dsl import Dataset, Input, Model, Output, Metrics
 from kfp.dsl import OutputPath, InputPath
 
@@ -8,7 +9,7 @@ from kfp.dsl import OutputPath, InputPath
 # COMPONENT 1: Data Ingestion
 # ─────────────────────────────────────────────
 @dsl.component(
-    base_image="python:3.12-slim",
+    base_image="python:3.11.9-slim",
     packages_to_install=["pandas", "numpy"],
 )
 def ingest(
@@ -36,7 +37,7 @@ def ingest(
 # COMPONENT 2: Data Validation
 # ─────────────────────────────────────────────
 @dsl.component(
-    base_image="python:3.12-slim",
+    base_image="python:3.11.9-slim",
     packages_to_install=["pandas", "numpy"],
 )
 def validate(
@@ -74,7 +75,7 @@ def validate(
 # COMPONENT 3: Preprocessing
 # ─────────────────────────────────────────────
 @dsl.component(
-    base_image="python:3.12-slim",
+    base_image="python:3.11.9-slim",
     packages_to_install=["pandas", "numpy", "scikit-learn"],
 )
 def preprocess(
@@ -116,7 +117,7 @@ def preprocess(
 # COMPONENT 4: Feature Engineering
 # ─────────────────────────────────────────────
 @dsl.component(
-    base_image="python:3.12-slim",
+    base_image="python:3.11.9-slim",
     packages_to_install=["pandas", "numpy", "scikit-learn"],
 )
 def feature_engineering(
@@ -160,7 +161,7 @@ def feature_engineering(
 # COMPONENT 5: Model Training
 # ─────────────────────────────────────────────
 @dsl.component(
-    base_image="python:3.12-slim",
+    base_image="python:3.11.9-slim",
     packages_to_install=[
         "pandas",
         "numpy",
@@ -258,7 +259,7 @@ def train(
 # COMPONENT 6: Evaluation
 # ─────────────────────────────────────────────
 @dsl.component(
-    base_image="python:3.12-slim",
+    base_image="python:3.11.9-slim",
     packages_to_install=[
         "pandas",
         "numpy",
@@ -360,7 +361,7 @@ def evaluate(
 # ─────────────────────────────────────────────
 # COMPONENT 7: Conditional Deployment
 # ─────────────────────────────────────────────
-@dsl.component(base_image="python:3.12-slim")
+@dsl.component(base_image="python:3.11.9-slim")
 def deploy(
     deploy_decision: InputPath(str),
     model_name: str = "fraudex-model",
@@ -398,6 +399,12 @@ def fraudex_pipeline(
         train_identity_path=train_identity_path,
     )
     ingest_task.set_retry(num_retries=2)
+    # Mount the PVC so /data is visible inside the ingest pod
+    kubernetes.mount_pvc(
+        ingest_task,
+        pvc_name="fraudex-data-pvc",
+        mount_path="/data",
+    )
 
     # Step 2: Validate
     validate_task = validate(

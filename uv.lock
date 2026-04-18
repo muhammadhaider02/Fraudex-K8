@@ -247,12 +247,14 @@ source = { virtual = "." }
 dependencies = [
     { name = "kaggle" },
     { name = "kfp" },
+    { name = "kfp-kubernetes" },
 ]
 
 [package.metadata]
 requires-dist = [
     { name = "kaggle", specifier = ">=2.0.1" },
-    { name = "kfp", specifier = "==2.4.0" },
+    { name = "kfp", specifier = "==2.5.0" },
+    { name = "kfp-kubernetes", specifier = ">=1.0.0" },
 ]
 
 [[package]]
@@ -405,7 +407,7 @@ wheels = [
 
 [[package]]
 name = "kfp"
-version = "2.4.0"
+version = "2.5.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "click" },
@@ -422,7 +424,17 @@ dependencies = [
     { name = "tabulate" },
     { name = "urllib3" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/0e/7c/66d4f0694dd1fe89a1a60de9f7bb6278ff1bf1436d58128791ea000828ca/kfp-2.4.0.tar.gz", hash = "sha256:44c25ce80b948629bf0fb0815b49d8d97039a825597a4378078bbaa0610aef69", size = 392310, upload-time = "2023-10-27T17:45:48.063Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/7d/f2/84d35ef3dde10a988e23930eec3fc0a25384ac8bbb6729a24b55d31cf700/kfp-2.5.0.tar.gz", hash = "sha256:13e0d87f5fc9b1b32f0138bbeb85f50eebf4d2b7058c52cc78597528ceb00a0c", size = 425383, upload-time = "2024-01-08T18:47:54.01Z" }
+
+[[package]]
+name = "kfp-kubernetes"
+version = "1.0.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "kfp" },
+    { name = "protobuf" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/f4/ec/a08481c097025cd68b9e66a19fa62c75968e48e69e1615975b66a5f219f7/kfp-kubernetes-1.0.0.tar.gz", hash = "sha256:39c93df10b3467385639a355b80b95c4e340dd245b421cdbc595a0b2d3c5e18c", size = 8967, upload-time = "2023-06-20T21:13:25.641Z" }
 
 [[package]]
 name = "kfp-pipeline-spec"
