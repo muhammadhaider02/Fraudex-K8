@@ -6,9 +6,11 @@
 #    imbalance_strategy: str [Default: 'smote']
 #    missing_threshold: float [Default: 0.5]
 #    recall_threshold: float [Default: 0.75]
+#    run_id: str [Default: 'run-1']
+#    s3_bucket: str [Default: 'fraudex-k8']
+#    s3_identity_key: str [Default: 'data/train_identity.csv']
+#    s3_transaction_key: str [Default: 'data/train_transaction.csv']
 #    test_size: float [Default: 0.2]
-#    train_identity_path: str
-#    train_transaction_path: str
 # Outputs:
 #    evaluate-metrics: system.Metrics
 #    validate-metrics: system.Metrics
@@ -69,6 +71,10 @@ components:
           defaultValue: 0.75
           isOptional: true
           parameterType: NUMBER_DOUBLE
+        run_id:
+          parameterType: STRING
+        s3_bucket:
+          parameterType: STRING
     outputDefinitions:
       artifacts:
         metrics:
@@ -105,9 +111,11 @@ components:
     executorLabel: exec-ingest
     inputDefinitions:
       parameters:
-        train_identity_path:
+        s3_bucket:
           parameterType: STRING
-        train_transaction_path:
+        s3_identity_key:
+          parameterType: STRING
+        s3_transaction_key:
           parameterType: STRING
     outputDefinitions:
       artifacts:
@@ -150,6 +158,10 @@ components:
         imbalance_strategy:
           defaultValue: smote
           isOptional: true
+          parameterType: STRING
+        run_id:
+          parameterType: STRING
+        s3_bucket:
           parameterType: STRING
     outputDefinitions:
       artifacts:
@@ -234,8 +246,8 @@ deploymentSpec:
           \ python3 -m pip install --quiet --no-warn-script-location 'kfp==2.5.0'\
           \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"'  &&\
           \  python3 -m pip install --quiet --no-warn-script-location 'pandas' 'numpy'\
-          \ 'scikit-learn' 'xgboost' 'lightgbm' 'joblib' 'shap' 'matplotlib' && \"\
-          $0\" \"$@\"\n"
+          \ 'scikit-learn' 'xgboost' 'lightgbm' 'joblib' 'shap' 'matplotlib' 'boto3'\
+          \ && \"$0\" \"$@\"\n"
         - sh
         - -ec
         - 'program_path=$(mktemp -d)
@@ -249,11 +261,12 @@ deploymentSpec:
         - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
           \ *\n\ndef evaluate(\n    input_test: Input[Dataset],\n    model_xgb: Input[Model],\n\
           \    model_lgbm: Input[Model],\n    model_hybrid: Input[Model],\n    metrics:\
-          \ Output[Metrics],\n    deploy_decision: OutputPath(str),\n    recall_threshold:\
-          \ float = 0.75,\n):\n    import joblib\n    import pandas as pd\n    import\
-          \ shap\n    import matplotlib.pyplot as plt\n    from sklearn.metrics import\
-          \ (\n        roc_auc_score,\n        precision_recall_fscore_support,\n\
-          \        confusion_matrix,\n    )\n\n    df = pd.read_csv(input_test.path)\n\
+          \ Output[Metrics],\n    deploy_decision: OutputPath(str),\n    s3_bucket:\
+          \ str,\n    run_id: str,\n    recall_threshold: float = 0.75,\n):\n    import\
+          \ joblib\n    import boto3\n    import pandas as pd\n    import shap\n \
+          \   import matplotlib.pyplot as plt\n    from sklearn.metrics import (\n\
+          \        roc_auc_score,\n        precision_recall_fscore_support,\n    \
+          \    confusion_matrix,\n    )\n\n    df = pd.read_csv(input_test.path)\n\
           \    X_test = df.drop(columns=[\"isFraud\"])\n    y_test = df[\"isFraud\"\
           ]\n\n    models = {\n        \"XGBoost\": joblib.load(model_xgb.path),\n\
           \        \"LightGBM\": joblib.load(model_lgbm.path),\n        \"Hybrid\"\
@@ -277,16 +290,19 @@ deploymentSpec:
           \ XGBoost\n    print(\"\\nRunning SHAP analysis on XGBoost...\")\n    xgb_model\
           \ = models[\"XGBoost\"]\n    explainer = shap.TreeExplainer(xgb_model)\n\
           \    sample = X_test.sample(min(500, len(X_test)), random_state=42)\n  \
-          \  shap_values = explainer.shap_values(sample)\n\n    plt.figure()\n   \
-          \ shap.summary_plot(shap_values, sample, show=False, max_display=20)\n \
-          \   plt.tight_layout()\n    plt.savefig(\"/tmp/shap_summary.png\", dpi=100)\n\
-          \    print(\"SHAP summary saved.\")\n\n    decision = \"true\" if best_recall\
-          \ >= recall_threshold else \"false\"\n    print(f\"\\nDeploy decision: {decision}\
-          \ (threshold={recall_threshold})\")\n\n    with open(deploy_decision, \"\
-          w\") as f:\n        f.write(decision)\n\n"
+          \  shap_values = explainer.shap_values(sample)\n\n    shap_path = \"/tmp/shap_summary.png\"\
+          \n    plt.figure()\n    shap.summary_plot(shap_values, sample, show=False,\
+          \ max_display=20)\n    plt.tight_layout()\n    plt.savefig(shap_path, dpi=100)\n\
+          \    print(\"SHAP summary saved locally.\")\n\n    s3 = boto3.client(\"\
+          s3\")\n    s3.upload_file(shap_path, s3_bucket, f\"artifacts/shap/shap_summary_{run_id}.png\"\
+          )\n    print(f\"SHAP plot uploaded to s3://{s3_bucket}/artifacts/shap/shap_summary_{run_id}.png\"\
+          )\n\n    decision = \"true\" if best_recall >= recall_threshold else \"\
+          false\"\n    print(f\"\\nDeploy decision: {decision} (threshold={recall_threshold})\"\
+          )\n\n    with open(deploy_decision, \"w\") as f:\n        f.write(decision)\n\
+          \n"
         image: python:3.11.9-slim
         resources:
-          memoryLimit: 4.0
+          memoryLimit: 8.0
     exec-feature-engineering:
       container:
         args:
@@ -345,7 +361,7 @@ deploymentSpec:
           \ python3 -m pip install --quiet --no-warn-script-location 'kfp==2.5.0'\
           \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"'  &&\
           \  python3 -m pip install --quiet --no-warn-script-location 'pandas' 'numpy'\
-          \ && \"$0\" \"$@\"\n"
+          \ 'boto3' && \"$0\" \"$@\"\n"
         - sh
         - -ec
         - 'program_path=$(mktemp -d)
@@ -357,14 +373,18 @@ deploymentSpec:
 
           '
         - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
-          \ *\n\ndef ingest(\n    train_transaction_path: str,\n    train_identity_path:\
-          \ str,\n    output_data: Output[Dataset],\n):\n    import pandas as pd\n\
-          \n    print(\"Loading transaction data...\")\n    trans = pd.read_csv(train_transaction_path)\n\
-          \n    print(\"Loading identity data...\")\n    identity = pd.read_csv(train_identity_path)\n\
-          \n    print(\"Merging on TransactionID...\")\n    df = trans.merge(identity,\
-          \ on=\"TransactionID\", how=\"left\")\n\n    print(f\"Merged shape: {df.shape}\"\
-          )\n    df.to_csv(output_data.path, index=False)\n    print(\"Ingestion complete.\"\
-          )\n\n"
+          \ *\n\ndef ingest(\n    s3_bucket: str,\n    s3_transaction_key: str,\n\
+          \    s3_identity_key: str,\n    output_data: Output[Dataset],\n):\n    import\
+          \ boto3\n    import pandas as pd\n    from io import BytesIO\n\n    s3 =\
+          \ boto3.client(\"s3\")\n\n    print(\"Downloading transaction data from\
+          \ S3...\")\n    trans_obj = s3.get_object(Bucket=s3_bucket, Key=s3_transaction_key)\n\
+          \    trans = pd.read_csv(BytesIO(trans_obj[\"Body\"].read()))\n\n    print(\"\
+          Downloading identity data from S3...\")\n    identity_obj = s3.get_object(Bucket=s3_bucket,\
+          \ Key=s3_identity_key)\n    identity = pd.read_csv(BytesIO(identity_obj[\"\
+          Body\"].read()))\n\n    print(\"Merging on TransactionID...\")\n    df =\
+          \ trans.merge(identity, on=\"TransactionID\", how=\"left\")\n\n    print(f\"\
+          Merged shape: {df.shape}\")\n    df.to_csv(output_data.path, index=False)\n\
+          \    print(\"Ingestion complete.\")\n\n"
         image: python:3.11.9-slim
     exec-preprocess:
       container:
@@ -426,8 +446,8 @@ deploymentSpec:
           \ python3 -m pip install --quiet --no-warn-script-location 'kfp==2.5.0'\
           \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"'  &&\
           \  python3 -m pip install --quiet --no-warn-script-location 'pandas' 'numpy'\
-          \ 'scikit-learn' 'xgboost' 'lightgbm' 'imbalanced-learn' 'joblib' && \"\
-          $0\" \"$@\"\n"
+          \ 'scikit-learn' 'xgboost' 'lightgbm' 'imbalanced-learn' 'joblib' 'boto3'\
+          \ && \"$0\" \"$@\"\n"
         - sh
         - -ec
         - 'program_path=$(mktemp -d)
@@ -441,40 +461,47 @@ deploymentSpec:
         - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
           \ *\n\ndef train(\n    input_train: Input[Dataset],\n    output_model_xgb:\
           \ Output[Model],\n    output_model_lgbm: Output[Model],\n    output_model_hybrid:\
-          \ Output[Model],\n    imbalance_strategy: str = \"smote\",\n    cost_sensitive:\
-          \ bool = True,\n):\n    import joblib\n    import pandas as pd\n    from\
-          \ imblearn.over_sampling import SMOTE\n    from sklearn.ensemble import\
-          \ RandomForestClassifier, VotingClassifier\n    from sklearn.linear_model\
-          \ import LogisticRegression\n    from xgboost import XGBClassifier\n   \
-          \ from lightgbm import LGBMClassifier\n\n    df = pd.read_csv(input_train.path)\n\
-          \    X = df.drop(columns=[\"isFraud\"])\n    y = df[\"isFraud\"]\n\n   \
-          \ fraud_weight = int((y == 0).sum() / (y == 1).sum())\n    print(f\"Class\
-          \ ratio (neg/pos): {fraud_weight}\")\n\n    if imbalance_strategy == \"\
-          smote\":\n        print(\"Applying SMOTE...\")\n        sm = SMOTE(random_state=42)\n\
-          \        X, y = sm.fit_resample(X, y)\n    else:\n        print(\"Using\
-          \ class_weight strategy...\")\n\n    fn_weight = fraud_weight if cost_sensitive\
-          \ else 1\n\n    print(\"Training XGBoost...\")\n    xgb = XGBClassifier(\n\
+          \ Output[Model],\n    s3_bucket: str,\n    run_id: str,\n    imbalance_strategy:\
+          \ str = \"smote\",\n    cost_sensitive: bool = True,\n):\n    import boto3\n\
+          \    import joblib\n    import pandas as pd\n    from imblearn.over_sampling\
+          \ import SMOTE\n    from sklearn.ensemble import RandomForestClassifier,\
+          \ VotingClassifier\n    from sklearn.linear_model import LogisticRegression\n\
+          \    from xgboost import XGBClassifier\n    from lightgbm import LGBMClassifier\n\
+          \n    df = pd.read_csv(input_train.path)\n    X = df.drop(columns=[\"isFraud\"\
+          ])\n    y = df[\"isFraud\"]\n\n    fraud_weight = int((y == 0).sum() / (y\
+          \ == 1).sum())\n    print(f\"Class ratio (neg/pos): {fraud_weight}\")\n\n\
+          \    if imbalance_strategy == \"smote\":\n        print(\"Applying SMOTE...\"\
+          )\n        sm = SMOTE(random_state=42)\n        X, y = sm.fit_resample(X,\
+          \ y)\n    else:\n        print(\"Using class_weight strategy...\")\n\n \
+          \   fn_weight = fraud_weight if cost_sensitive else 1\n\n    s3 = boto3.client(\"\
+          s3\")\n\n    print(\"Training XGBoost...\")\n    xgb = XGBClassifier(\n\
           \        scale_pos_weight=fn_weight,\n        n_estimators=300,\n      \
           \  max_depth=6,\n        learning_rate=0.05,\n        subsample=0.8,\n \
-          \       colsample_bytree=0.8,\n        eval_metric=\"aucpr\",\n        random_state=42,\n\
-          \        n_jobs=-1,\n    )\n    xgb.fit(X, y)\n    joblib.dump(xgb, output_model_xgb.path)\n\
-          \    print(\"XGBoost saved.\")\n\n    print(\"Training LightGBM...\")\n\
-          \    lgbm = LGBMClassifier(\n        scale_pos_weight=fn_weight,\n     \
-          \   n_estimators=300,\n        learning_rate=0.05,\n        num_leaves=63,\n\
-          \        subsample=0.8,\n        colsample_bytree=0.8,\n        random_state=42,\n\
-          \        n_jobs=-1,\n    )\n    lgbm.fit(X, y)\n    joblib.dump(lgbm, output_model_lgbm.path)\n\
-          \    print(\"LightGBM saved.\")\n\n    print(\"Training Hybrid (RF + LR\
-          \ Voting)...\")\n    rf = RandomForestClassifier(\n        n_estimators=200,\n\
-          \        class_weight={0: 1, 1: fn_weight},\n        random_state=42,\n\
-          \        n_jobs=-1,\n    )\n    lr = LogisticRegression(\n        class_weight={0:\
+          \       colsample_bytree=0.8,\n        eval_metric=\"aucpr\",\n        device=\"\
+          cuda\",\n        tree_method=\"hist\",\n        random_state=42,\n     \
+          \   n_jobs=-1,\n    )\n    xgb.fit(X, y)\n    joblib.dump(xgb, output_model_xgb.path)\n\
+          \    s3.upload_file(output_model_xgb.path, s3_bucket, f\"models/{run_id}/xgb.joblib\"\
+          )\n    print(\"XGBoost saved and uploaded to S3.\")\n\n    print(\"Training\
+          \ LightGBM...\")\n    lgbm = LGBMClassifier(\n        scale_pos_weight=fn_weight,\n\
+          \        n_estimators=300,\n        learning_rate=0.05,\n        num_leaves=63,\n\
+          \        subsample=0.8,\n        colsample_bytree=0.8,\n        device=\"\
+          gpu\",\n        random_state=42,\n        n_jobs=-1,\n    )\n    lgbm.fit(X,\
+          \ y)\n    joblib.dump(lgbm, output_model_lgbm.path)\n    s3.upload_file(output_model_lgbm.path,\
+          \ s3_bucket, f\"models/{run_id}/lgbm.joblib\")\n    print(\"LightGBM saved\
+          \ and uploaded to S3.\")\n\n    print(\"Training Hybrid (RF + LR Voting)...\"\
+          )\n    rf = RandomForestClassifier(\n        n_estimators=200,\n       \
+          \ class_weight={0: 1, 1: fn_weight},\n        random_state=42,\n       \
+          \ n_jobs=-1,\n    )\n    lr = LogisticRegression(\n        class_weight={0:\
           \ 1, 1: fn_weight},\n        max_iter=1000,\n        random_state=42,\n\
           \    )\n    hybrid = VotingClassifier(\n        estimators=[(\"rf\", rf),\
           \ (\"lr\", lr)], voting=\"soft\"\n    )\n    hybrid.fit(X, y)\n    joblib.dump(hybrid,\
-          \ output_model_hybrid.path)\n    print(\"Hybrid model saved.\")\n\n"
+          \ output_model_hybrid.path)\n    s3.upload_file(output_model_hybrid.path,\
+          \ s3_bucket, f\"models/{run_id}/hybrid.joblib\")\n    print(\"Hybrid model\
+          \ saved and uploaded to S3.\")\n\n"
         image: python:3.11.9-slim
         resources:
-          cpuLimit: 4.0
-          memoryLimit: 8.0
+          cpuLimit: 8.0
+          memoryLimit: 16.0
     exec-validate:
       container:
         args:
@@ -578,6 +605,10 @@ root:
           parameters:
             recall_threshold:
               componentInputParameter: recall_threshold
+            run_id:
+              componentInputParameter: run_id
+            s3_bucket:
+              componentInputParameter: s3_bucket
         taskInfo:
           name: evaluate
       feature-engineering:
@@ -605,10 +636,12 @@ root:
           name: comp-ingest
         inputs:
           parameters:
-            train_identity_path:
-              componentInputParameter: train_identity_path
-            train_transaction_path:
-              componentInputParameter: train_transaction_path
+            s3_bucket:
+              componentInputParameter: s3_bucket
+            s3_identity_key:
+              componentInputParameter: s3_identity_key
+            s3_transaction_key:
+              componentInputParameter: s3_transaction_key
         retryPolicy:
           backoffDuration: 0s
           backoffFactor: 2.0
@@ -652,6 +685,10 @@ root:
               componentInputParameter: cost_sensitive
             imbalance_strategy:
               componentInputParameter: imbalance_strategy
+            run_id:
+              componentInputParameter: run_id
+            s3_bucket:
+              componentInputParameter: s3_bucket
         taskInfo:
           name: train
       validate:
@@ -692,14 +729,26 @@ root:
         defaultValue: 0.75
         isOptional: true
         parameterType: NUMBER_DOUBLE
+      run_id:
+        defaultValue: run-1
+        isOptional: true
+        parameterType: STRING
+      s3_bucket:
+        defaultValue: fraudex-k8
+        isOptional: true
+        parameterType: STRING
+      s3_identity_key:
+        defaultValue: data/train_identity.csv
+        isOptional: true
+        parameterType: STRING
+      s3_transaction_key:
+        defaultValue: data/train_transaction.csv
+        isOptional: true
+        parameterType: STRING
       test_size:
         defaultValue: 0.2
         isOptional: true
         parameterType: NUMBER_DOUBLE
-      train_identity_path:
-        parameterType: STRING
-      train_transaction_path:
-        parameterType: STRING
   outputDefinitions:
     artifacts:
       evaluate-metrics:
@@ -712,12 +761,3 @@ root:
           schemaVersion: 0.0.1
 schemaVersion: 2.1.0
 sdkVersion: kfp-2.5.0
----
-platforms:
-  kubernetes:
-    deploymentSpec:
-      executors:
-        exec-ingest:
-          pvcMount:
-          - constant: fraudex-data-pvc
-            mountPath: /data

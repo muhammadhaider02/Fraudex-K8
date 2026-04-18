@@ -1,6 +1,5 @@
 import kfp
 from kfp import dsl
-from kfp import kubernetes
 from kfp.dsl import Dataset, Input, Model, Output, Metrics
 from kfp.dsl import OutputPath, InputPath
 
@@ -10,20 +9,27 @@ from kfp.dsl import OutputPath, InputPath
 # ─────────────────────────────────────────────
 @dsl.component(
     base_image="python:3.11.9-slim",
-    packages_to_install=["pandas", "numpy"],
+    packages_to_install=["pandas", "numpy", "boto3"],
 )
 def ingest(
-    train_transaction_path: str,
-    train_identity_path: str,
+    s3_bucket: str,
+    s3_transaction_key: str,
+    s3_identity_key: str,
     output_data: Output[Dataset],
 ):
+    import boto3
     import pandas as pd
+    from io import BytesIO
 
-    print("Loading transaction data...")
-    trans = pd.read_csv(train_transaction_path)
+    s3 = boto3.client("s3")
 
-    print("Loading identity data...")
-    identity = pd.read_csv(train_identity_path)
+    print("Downloading transaction data from S3...")
+    trans_obj = s3.get_object(Bucket=s3_bucket, Key=s3_transaction_key)
+    trans = pd.read_csv(BytesIO(trans_obj["Body"].read()))
+
+    print("Downloading identity data from S3...")
+    identity_obj = s3.get_object(Bucket=s3_bucket, Key=s3_identity_key)
+    identity = pd.read_csv(BytesIO(identity_obj["Body"].read()))
 
     print("Merging on TransactionID...")
     df = trans.merge(identity, on="TransactionID", how="left")
@@ -170,6 +176,7 @@ def feature_engineering(
         "lightgbm",
         "imbalanced-learn",
         "joblib",
+        "boto3",
     ],
 )
 def train(
@@ -177,9 +184,12 @@ def train(
     output_model_xgb: Output[Model],
     output_model_lgbm: Output[Model],
     output_model_hybrid: Output[Model],
+    s3_bucket: str,
+    run_id: str,
     imbalance_strategy: str = "smote",
     cost_sensitive: bool = True,
 ):
+    import boto3
     import joblib
     import pandas as pd
     from imblearn.over_sampling import SMOTE
@@ -204,6 +214,8 @@ def train(
 
     fn_weight = fraud_weight if cost_sensitive else 1
 
+    s3 = boto3.client("s3")
+
     print("Training XGBoost...")
     xgb = XGBClassifier(
         scale_pos_weight=fn_weight,
@@ -213,12 +225,15 @@ def train(
         subsample=0.8,
         colsample_bytree=0.8,
         eval_metric="aucpr",
+        device="cuda",
+        tree_method="hist",
         random_state=42,
         n_jobs=-1,
     )
     xgb.fit(X, y)
     joblib.dump(xgb, output_model_xgb.path)
-    print("XGBoost saved.")
+    s3.upload_file(output_model_xgb.path, s3_bucket, f"models/{run_id}/xgb.joblib")
+    print("XGBoost saved and uploaded to S3.")
 
     print("Training LightGBM...")
     lgbm = LGBMClassifier(
@@ -228,12 +243,14 @@ def train(
         num_leaves=63,
         subsample=0.8,
         colsample_bytree=0.8,
+        device="gpu",
         random_state=42,
         n_jobs=-1,
     )
     lgbm.fit(X, y)
     joblib.dump(lgbm, output_model_lgbm.path)
-    print("LightGBM saved.")
+    s3.upload_file(output_model_lgbm.path, s3_bucket, f"models/{run_id}/lgbm.joblib")
+    print("LightGBM saved and uploaded to S3.")
 
     print("Training Hybrid (RF + LR Voting)...")
     rf = RandomForestClassifier(
@@ -252,7 +269,8 @@ def train(
     )
     hybrid.fit(X, y)
     joblib.dump(hybrid, output_model_hybrid.path)
-    print("Hybrid model saved.")
+    s3.upload_file(output_model_hybrid.path, s3_bucket, f"models/{run_id}/hybrid.joblib")
+    print("Hybrid model saved and uploaded to S3.")
 
 
 # ─────────────────────────────────────────────
@@ -269,6 +287,7 @@ def train(
         "joblib",
         "shap",
         "matplotlib",
+        "boto3",
     ],
 )
 def evaluate(
@@ -278,9 +297,12 @@ def evaluate(
     model_hybrid: Input[Model],
     metrics: Output[Metrics],
     deploy_decision: OutputPath(str),
+    s3_bucket: str,
+    run_id: str,
     recall_threshold: float = 0.75,
 ):
     import joblib
+    import boto3
     import pandas as pd
     import shap
     import matplotlib.pyplot as plt
@@ -345,11 +367,16 @@ def evaluate(
     sample = X_test.sample(min(500, len(X_test)), random_state=42)
     shap_values = explainer.shap_values(sample)
 
+    shap_path = "/tmp/shap_summary.png"
     plt.figure()
     shap.summary_plot(shap_values, sample, show=False, max_display=20)
     plt.tight_layout()
-    plt.savefig("/tmp/shap_summary.png", dpi=100)
-    print("SHAP summary saved.")
+    plt.savefig(shap_path, dpi=100)
+    print("SHAP summary saved locally.")
+
+    s3 = boto3.client("s3")
+    s3.upload_file(shap_path, s3_bucket, f"artifacts/shap/shap_summary_{run_id}.png")
+    print(f"SHAP plot uploaded to s3://{s3_bucket}/artifacts/shap/shap_summary_{run_id}.png")
 
     decision = "true" if best_recall >= recall_threshold else "false"
     print(f"\nDeploy decision: {decision} (threshold={recall_threshold})")
@@ -385,8 +412,10 @@ def deploy(
     description="End-to-end fraud detection pipeline on IEEE CIS dataset",
 )
 def fraudex_pipeline(
-    train_transaction_path: str,
-    train_identity_path: str,
+    s3_bucket: str = "fraudex-k8",
+    s3_transaction_key: str = "data/train_transaction.csv",
+    s3_identity_key: str = "data/train_identity.csv",
+    run_id: str = "run-1",
     missing_threshold: float = 0.5,
     test_size: float = 0.2,
     imbalance_strategy: str = "smote",
@@ -395,16 +424,11 @@ def fraudex_pipeline(
 ):
     # Step 1: Ingest
     ingest_task = ingest(
-        train_transaction_path=train_transaction_path,
-        train_identity_path=train_identity_path,
+        s3_bucket=s3_bucket,
+        s3_transaction_key=s3_transaction_key,
+        s3_identity_key=s3_identity_key,
     )
     ingest_task.set_retry(num_retries=2)
-    # Mount the PVC so /data is visible inside the ingest pod
-    kubernetes.mount_pvc(
-        ingest_task,
-        pvc_name="fraudex-data-pvc",
-        mount_path="/data",
-    )
 
     # Step 2: Validate
     validate_task = validate(
@@ -427,11 +451,13 @@ def fraudex_pipeline(
     # Step 5: Train
     train_task = train(
         input_train=fe_task.outputs["output_train"],
+        s3_bucket=s3_bucket,
+        run_id=run_id,
         imbalance_strategy=imbalance_strategy,
         cost_sensitive=cost_sensitive,
     )
-    train_task.set_memory_limit("8G")
-    train_task.set_cpu_limit("4")
+    train_task.set_memory_limit("16G")
+    train_task.set_cpu_limit("8")
 
     # Step 6: Evaluate
     evaluate_task = evaluate(
@@ -439,9 +465,11 @@ def fraudex_pipeline(
         model_xgb=train_task.outputs["output_model_xgb"],
         model_lgbm=train_task.outputs["output_model_lgbm"],
         model_hybrid=train_task.outputs["output_model_hybrid"],
+        s3_bucket=s3_bucket,
+        run_id=run_id,
         recall_threshold=recall_threshold,
     )
-    evaluate_task.set_memory_limit("4G")
+    evaluate_task.set_memory_limit("8G")
 
     # Step 7: Conditional deploy
     with dsl.If(
