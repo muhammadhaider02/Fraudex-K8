@@ -167,7 +167,7 @@ def feature_engineering(
 # COMPONENT 5: Model Training
 # ─────────────────────────────────────────────
 @dsl.component(
-    base_image="python:3.11.9-slim",
+    base_image="python:3.11.9",
     packages_to_install=[
         "pandas",
         "numpy",
@@ -277,7 +277,7 @@ def train(
 # COMPONENT 6: Evaluation
 # ─────────────────────────────────────────────
 @dsl.component(
-    base_image="python:3.11.9-slim",
+    base_image="python:3.11.9",
     packages_to_install=[
         "pandas",
         "numpy",

@@ -297,7 +297,7 @@ deploymentSpec:
           false\"\n    print(f\"\\nDeploy decision: {decision} (threshold={recall_threshold})\"\
           )\n\n    with open(deploy_decision, \"w\") as f:\n        f.write(decision)\n\
           \n"
-        image: python:3.11.9-slim
+        image: python:3.11.9
         resources:
           memoryLimit: 8.0
           resourceMemoryLimit: 8G
@@ -496,7 +496,7 @@ deploymentSpec:
           \ output_model_hybrid.path)\n    s3.upload_file(output_model_hybrid.path,\
           \ s3_bucket, f\"models/{run_id}/hybrid.joblib\")\n    print(\"Hybrid model\
           \ saved and uploaded to S3.\")\n\n"
-        image: python:3.11.9-slim
+        image: python:3.11.9
         resources:
           cpuLimit: 6.0
           memoryLimit: 16.0
