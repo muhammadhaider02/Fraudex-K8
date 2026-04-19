@@ -225,8 +225,6 @@ def train(
         subsample=0.8,
         colsample_bytree=0.8,
         eval_metric="aucpr",
-        device="cuda",
-        tree_method="hist",
         random_state=42,
         n_jobs=-1,
     )
@@ -243,7 +241,6 @@ def train(
         num_leaves=63,
         subsample=0.8,
         colsample_bytree=0.8,
-        device="gpu",
         random_state=42,
         n_jobs=-1,
     )
