@@ -12,37 +12,6 @@
 #    s3_transaction_key: str [Default: 'data/train_transaction.csv']
 #    test_size: float [Default: 0.2]
 components:
-  comp-condition-1:
-    dag:
-      tasks:
-        deploy:
-          cachingOptions:
-            enableCache: true
-          componentRef:
-            name: comp-deploy
-          inputs:
-            parameters:
-              deploy_decision:
-                componentInputParameter: pipelinechannel--evaluate-deploy_decision
-              model_name:
-                runtimeValue:
-                  constant: fraudex-model
-          taskInfo:
-            name: deploy
-    inputDefinitions:
-      parameters:
-        pipelinechannel--evaluate-deploy_decision:
-          parameterType: STRING
-  comp-deploy:
-    executorLabel: exec-deploy
-    inputDefinitions:
-      parameters:
-        deploy_decision:
-          parameterType: STRING
-        model_name:
-          defaultValue: fraudex-model
-          isOptional: true
-          parameterType: STRING
   comp-evaluate:
     executorLabel: exec-evaluate
     inputDefinitions:
@@ -78,9 +47,6 @@ components:
           artifactType:
             schemaTitle: system.Metrics
             schemaVersion: 0.0.1
-      parameters:
-        deploy_decision:
-          parameterType: STRING
   comp-feature-engineering:
     executorLabel: exec-feature-engineering
     inputDefinitions:
@@ -194,39 +160,6 @@ components:
             schemaVersion: 0.0.1
 deploymentSpec:
   executors:
-    exec-deploy:
-      container:
-        args:
-        - --executor_input
-        - '{{$}}'
-        - --function_to_execute
-        - deploy
-        command:
-        - sh
-        - -c
-        - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
-          \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
-          \ python3 -m pip install --quiet --no-warn-script-location 'kfp==2.15.0'\
-          \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"' && \"\
-          $0\" \"$@\"\n"
-        - sh
-        - -ec
-        - 'program_path=$(mktemp -d)
-
-
-          printf "%s" "$0" > "$program_path/ephemeral_component.py"
-
-          _KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
-
-          '
-        - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
-          \ *\n\ndef deploy(\n    deploy_decision: str,\n    model_name: str = \"\
-          fraudex-model\",\n):\n    if deploy_decision == \"true\":\n        print(f\"\
-          Deploying {model_name} to serving endpoint...\")\n        print(\"Model\
-          \ registered successfully.\")\n    else:\n        print(\"Recall below threshold.\
-          \ Deployment skipped.\")\n        print(\"Pipeline flagged for review.\"\
-          )\n\n"
-        image: python:3.11.9-slim
     exec-evaluate:
       container:
         args:
@@ -257,12 +190,11 @@ deploymentSpec:
         - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
           \ *\n\ndef evaluate(\n    input_test: Input[Dataset],\n    model_xgb: Input[Model],\n\
           \    model_lgbm: Input[Model],\n    model_hybrid: Input[Model],\n    metrics:\
-          \ Output[Metrics],\n    deploy_decision: OutputPath(str),\n    s3_bucket:\
-          \ str,\n    run_id: str,\n    recall_threshold: float = 0.75,\n):\n    import\
-          \ joblib\n    import boto3\n    import pandas as pd\n    import shap\n \
-          \   import matplotlib.pyplot as plt\n    from sklearn.metrics import (\n\
-          \        roc_auc_score,\n        precision_recall_fscore_support,\n    \
-          \    confusion_matrix,\n    )\n\n    df = pd.read_csv(input_test.path)\n\
+          \ Output[Metrics],\n    s3_bucket: str,\n    run_id: str,\n    recall_threshold:\
+          \ float = 0.75,\n):\n    import joblib\n    import boto3\n    import pandas\
+          \ as pd\n    import shap\n    import matplotlib.pyplot as plt\n    from\
+          \ sklearn.metrics import (\n        roc_auc_score,\n        precision_recall_fscore_support,\n\
+          \        confusion_matrix,\n    )\n\n    df = pd.read_csv(input_test.path)\n\
           \    X_test = df.drop(columns=[\"isFraud\"])\n    y_test = df[\"isFraud\"\
           ]\n\n    models = {\n        \"XGBoost\": joblib.load(model_xgb.path),\n\
           \        \"LightGBM\": joblib.load(model_lgbm.path),\n        \"Hybrid\"\
@@ -294,8 +226,10 @@ deploymentSpec:
           )\n    print(f\"SHAP plot uploaded to s3://{s3_bucket}/artifacts/shap/shap_summary_{run_id}.png\"\
           )\n\n    decision = \"true\" if best_recall >= recall_threshold else \"\
           false\"\n    print(f\"\\nDeploy decision: {decision} (threshold={recall_threshold})\"\
-          )\n\n    with open(deploy_decision, \"w\") as f:\n        f.write(decision)\n\
-          \n"
+          )\n\n    if decision == \"true\":\n        print(\"Deploy decision: PASS\
+          \ - Model meets recall threshold.\")\n        print(\"Model registered successfully.\"\
+          )\n    else:\n        print(\"Deploy decision: FAIL - Recall below threshold.\"\
+          )\n        print(\"Pipeline flagged for review.\")\n\n"
         image: python:3.11.9
         resources:
           memoryLimit: 8.0
@@ -548,22 +482,6 @@ pipelineInfo:
 root:
   dag:
     tasks:
-      condition-1:
-        componentRef:
-          name: comp-condition-1
-        dependentTasks:
-        - evaluate
-        inputs:
-          parameters:
-            pipelinechannel--evaluate-deploy_decision:
-              taskOutputParameter:
-                outputParameterKey: deploy_decision
-                producerTask: evaluate
-        taskInfo:
-          name: recall-check
-        triggerPolicy:
-          condition: inputs.parameter_values['pipelinechannel--evaluate-deploy_decision']
-            == 'true'
       evaluate:
         cachingOptions:
           enableCache: true

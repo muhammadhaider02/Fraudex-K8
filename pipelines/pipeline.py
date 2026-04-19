@@ -1,8 +1,6 @@
 import kfp
 from kfp import dsl
 from kfp.dsl import Dataset, Input, Model, Output, Metrics
-from kfp.dsl import OutputPath
-
 
 # ─────────────────────────────────────────────
 # COMPONENT 1: Data Ingestion
@@ -295,7 +293,6 @@ def evaluate(
     model_lgbm: Input[Model],
     model_hybrid: Input[Model],
     metrics: Output[Metrics],
-    deploy_decision: OutputPath(str),
     s3_bucket: str,
     run_id: str,
     recall_threshold: float = 0.75,
@@ -380,23 +377,11 @@ def evaluate(
     decision = "true" if best_recall >= recall_threshold else "false"
     print(f"\nDeploy decision: {decision} (threshold={recall_threshold})")
 
-    with open(deploy_decision, "w") as f:
-        f.write(decision)
-
-
-# ─────────────────────────────────────────────
-# COMPONENT 7: Conditional Deployment
-# ─────────────────────────────────────────────
-@dsl.component(base_image="python:3.11.9-slim")
-def deploy(
-    deploy_decision: str,
-    model_name: str = "fraudex-model",
-):
-    if deploy_decision == "true":
-        print(f"Deploying {model_name} to serving endpoint...")
+    if decision == "true":
+        print("Deploy decision: PASS - Model meets recall threshold.")
         print("Model registered successfully.")
     else:
-        print("Recall below threshold. Deployment skipped.")
+        print("Deploy decision: FAIL - Recall below threshold.")
         print("Pipeline flagged for review.")
 
 
@@ -466,16 +451,6 @@ def fraudex_pipeline(
         recall_threshold=recall_threshold,
     )
     evaluate_task.set_memory_limit("8G")
-
-    # Step 7: Conditional deploy
-    with dsl.If(
-        evaluate_task.outputs["deploy_decision"] == "true",
-        name="recall-check",
-    ):
-        deploy(
-            deploy_decision=evaluate_task.outputs["deploy_decision"],
-            model_name="fraudex-model",
-        )
 
 
 # ─────────────────────────────────────────────
