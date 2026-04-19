@@ -137,17 +137,20 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Trigger Kubeflow pipeline run on EC2
+      - name: Deploy & Trigger KFP on EC2
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.EC2_HOST }}
           username: ubuntu
           key: ${{ secrets.EC2_SSH_KEY }}
-          command_timeout: 10m
+          timeout: 120s
+          command_timeout: 30m
           script: |
+            # ── Pull latest code ──────────────────────────
             cd ~/Fraudex-K8
             git pull origin main
 
+            # ── Trigger Kubeflow pipeline run ─────────────
             TRIGGER_REASON="${{ github.event.inputs.trigger_reason || 'code_push' }}"
             TIMESTAMP=$(date +%Y%m%d-%H%M%S)
             RUN_ID="cicd-${TIMESTAMP}"
@@ -177,15 +180,7 @@ jobs:
             echo "$RUN_OUTPUT"
             echo "Pipeline triggered successfully"
 
-      - name: Deploy inference API on EC2
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ secrets.EC2_HOST }}
-          username: ubuntu
-          key: ${{ secrets.EC2_SSH_KEY }}
-          timeout: 120s
-          command_timeout: 30m
-          script: |
+            # ── Deploy inference API ──────────────────────
             echo "Deploying inference API..."
 
             export PATH=$PATH:/home/ubuntu/.local/bin
