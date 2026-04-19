@@ -457,7 +457,7 @@ def fraudex_pipeline(
         cost_sensitive=cost_sensitive,
     )
     train_task.set_memory_limit("16G")
-    train_task.set_cpu_limit("8")
+    train_task.set_cpu_limit("6")
 
     # Step 6: Evaluate
     evaluate_task = evaluate(

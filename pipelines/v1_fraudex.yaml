@@ -498,9 +498,9 @@ deploymentSpec:
           \ saved and uploaded to S3.\")\n\n"
         image: python:3.11.9-slim
         resources:
-          cpuLimit: 8.0
+          cpuLimit: 6.0
           memoryLimit: 16.0
-          resourceCpuLimit: '8'
+          resourceCpuLimit: '6'
           resourceMemoryLimit: 16G
     exec-validate:
       container:
