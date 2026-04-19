@@ -1,6 +1,6 @@
-import kfp
 from kfp import dsl
 from kfp.dsl import Dataset, Input, Model, Output, Metrics
+
 
 # ─────────────────────────────────────────────
 # COMPONENT 1: Data Ingestion
