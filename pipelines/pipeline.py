@@ -218,6 +218,7 @@ def train(
 
     print("Training XGBoost...")
     xgb = XGBClassifier(
+        device="cpu",
         scale_pos_weight=fn_weight,
         n_estimators=300,
         max_depth=6,
@@ -235,6 +236,7 @@ def train(
 
     print("Training LightGBM...")
     lgbm = LGBMClassifier(
+        device_type="cpu",
         scale_pos_weight=fn_weight,
         n_estimators=300,
         learning_rate=0.05,
