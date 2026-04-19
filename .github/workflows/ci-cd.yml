@@ -183,13 +183,14 @@ jobs:
           host: ${{ secrets.EC2_HOST }}
           username: ubuntu
           key: ${{ secrets.EC2_SSH_KEY }}
+          timeout: 120s
           command_timeout: 30m
           script: |
             echo "Deploying inference API..."
 
-            pip3 install fastapi uvicorn boto3 joblib scikit-learn xgboost lightgbm --quiet
-
             export PATH=$PATH:/home/ubuntu/.local/bin
+
+            python3 -c "import uvicorn" 2>/dev/null || pip3 install fastapi uvicorn boto3 joblib scikit-learn xgboost lightgbm --quiet
 
             pkill -f "uvicorn app:app" || true
             sleep 2
