@@ -475,25 +475,23 @@ deploymentSpec:
           s3\")\n\n    print(\"Training XGBoost...\")\n    xgb = XGBClassifier(\n\
           \        scale_pos_weight=fn_weight,\n        n_estimators=300,\n      \
           \  max_depth=6,\n        learning_rate=0.05,\n        subsample=0.8,\n \
-          \       colsample_bytree=0.8,\n        eval_metric=\"aucpr\",\n        device=\"\
-          cuda\",\n        tree_method=\"hist\",\n        random_state=42,\n     \
-          \   n_jobs=-1,\n    )\n    xgb.fit(X, y)\n    joblib.dump(xgb, output_model_xgb.path)\n\
+          \       colsample_bytree=0.8,\n        eval_metric=\"aucpr\",\n        random_state=42,\n\
+          \        n_jobs=-1,\n    )\n    xgb.fit(X, y)\n    joblib.dump(xgb, output_model_xgb.path)\n\
           \    s3.upload_file(output_model_xgb.path, s3_bucket, f\"models/{run_id}/xgb.joblib\"\
           )\n    print(\"XGBoost saved and uploaded to S3.\")\n\n    print(\"Training\
           \ LightGBM...\")\n    lgbm = LGBMClassifier(\n        scale_pos_weight=fn_weight,\n\
           \        n_estimators=300,\n        learning_rate=0.05,\n        num_leaves=63,\n\
-          \        subsample=0.8,\n        colsample_bytree=0.8,\n        device=\"\
-          gpu\",\n        random_state=42,\n        n_jobs=-1,\n    )\n    lgbm.fit(X,\
-          \ y)\n    joblib.dump(lgbm, output_model_lgbm.path)\n    s3.upload_file(output_model_lgbm.path,\
-          \ s3_bucket, f\"models/{run_id}/lgbm.joblib\")\n    print(\"LightGBM saved\
-          \ and uploaded to S3.\")\n\n    print(\"Training Hybrid (RF + LR Voting)...\"\
-          )\n    rf = RandomForestClassifier(\n        n_estimators=200,\n       \
-          \ class_weight={0: 1, 1: fn_weight},\n        random_state=42,\n       \
-          \ n_jobs=-1,\n    )\n    lr = LogisticRegression(\n        class_weight={0:\
-          \ 1, 1: fn_weight},\n        max_iter=1000,\n        random_state=42,\n\
-          \    )\n    hybrid = VotingClassifier(\n        estimators=[(\"rf\", rf),\
-          \ (\"lr\", lr)], voting=\"soft\"\n    )\n    hybrid.fit(X, y)\n    joblib.dump(hybrid,\
-          \ output_model_hybrid.path)\n    s3.upload_file(output_model_hybrid.path,\
+          \        subsample=0.8,\n        colsample_bytree=0.8,\n        random_state=42,\n\
+          \        n_jobs=-1,\n    )\n    lgbm.fit(X, y)\n    joblib.dump(lgbm, output_model_lgbm.path)\n\
+          \    s3.upload_file(output_model_lgbm.path, s3_bucket, f\"models/{run_id}/lgbm.joblib\"\
+          )\n    print(\"LightGBM saved and uploaded to S3.\")\n\n    print(\"Training\
+          \ Hybrid (RF + LR Voting)...\")\n    rf = RandomForestClassifier(\n    \
+          \    n_estimators=200,\n        class_weight={0: 1, 1: fn_weight},\n   \
+          \     random_state=42,\n        n_jobs=-1,\n    )\n    lr = LogisticRegression(\n\
+          \        class_weight={0: 1, 1: fn_weight},\n        max_iter=1000,\n  \
+          \      random_state=42,\n    )\n    hybrid = VotingClassifier(\n       \
+          \ estimators=[(\"rf\", rf), (\"lr\", lr)], voting=\"soft\"\n    )\n    hybrid.fit(X,\
+          \ y)\n    joblib.dump(hybrid, output_model_hybrid.path)\n    s3.upload_file(output_model_hybrid.path,\
           \ s3_bucket, f\"models/{run_id}/hybrid.joblib\")\n    print(\"Hybrid model\
           \ saved and uploaded to S3.\")\n\n"
         image: python:3.11.9
