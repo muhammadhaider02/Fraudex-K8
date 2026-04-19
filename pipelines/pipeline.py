@@ -1,7 +1,7 @@
 import kfp
 from kfp import dsl
 from kfp.dsl import Dataset, Input, Model, Output, Metrics
-from kfp.dsl import OutputPath, InputPath
+from kfp.dsl import OutputPath
 
 
 # ─────────────────────────────────────────────
@@ -389,13 +389,10 @@ def evaluate(
 # ─────────────────────────────────────────────
 @dsl.component(base_image="python:3.11.9-slim")
 def deploy(
-    deploy_decision: InputPath(str),
+    deploy_decision: str,
     model_name: str = "fraudex-model",
 ):
-    with open(deploy_decision, "r") as f:
-        decision = f.read().strip()
-
-    if decision == "true":
+    if deploy_decision == "true":
         print(f"Deploying {model_name} to serving endpoint...")
         print("Model registered successfully.")
     else:

@@ -220,13 +220,12 @@ deploymentSpec:
 
           '
         - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
-          \ *\n\ndef deploy(\n    deploy_decision: InputPath(str),\n    model_name:\
-          \ str = \"fraudex-model\",\n):\n    with open(deploy_decision, \"r\") as\
-          \ f:\n        decision = f.read().strip()\n\n    if decision == \"true\"\
-          :\n        print(f\"Deploying {model_name} to serving endpoint...\")\n \
-          \       print(\"Model registered successfully.\")\n    else:\n        print(\"\
-          Recall below threshold. Deployment skipped.\")\n        print(\"Pipeline\
-          \ flagged for review.\")\n\n"
+          \ *\n\ndef deploy(\n    deploy_decision: str,\n    model_name: str = \"\
+          fraudex-model\",\n):\n    if deploy_decision == \"true\":\n        print(f\"\
+          Deploying {model_name} to serving endpoint...\")\n        print(\"Model\
+          \ registered successfully.\")\n    else:\n        print(\"Recall below threshold.\
+          \ Deployment skipped.\")\n        print(\"Pipeline flagged for review.\"\
+          )\n\n"
         image: python:3.11.9-slim
     exec-evaluate:
       container:
