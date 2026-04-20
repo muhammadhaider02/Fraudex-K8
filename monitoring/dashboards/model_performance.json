@@ -1,0 +1,237 @@
+{
+    "id": null,
+    "uid": "fraudex-model-performance",
+    "title": "Fraudex - Model Performance",
+    "tags": [
+        "fraudex",
+        "model"
+    ],
+    "timezone": "browser",
+    "schemaVersion": 38,
+    "version": 1,
+    "refresh": "1m",
+    "panels": [
+        {
+            "id": 1,
+            "title": "Fraud Recall",
+            "type": "gauge",
+            "gridPos": {
+                "h": 8,
+                "w": 6,
+                "x": 0,
+                "y": 0
+            },
+            "targets": [
+                {
+                    "expr": "fraudex_fraud_recall",
+                    "legendFormat": "Recall",
+                    "refId": "A"
+                }
+            ],
+            "fieldConfig": {
+                "defaults": {
+                    "unit": "percentunit",
+                    "min": 0,
+                    "max": 1,
+                    "thresholds": {
+                        "steps": [
+                            {
+                                "color": "red",
+                                "value": null
+                            },
+                            {
+                                "color": "yellow",
+                                "value": 0.70
+                            },
+                            {
+                                "color": "green",
+                                "value": 0.80
+                            }
+                        ]
+                    }
+                }
+            }
+        },
+        {
+            "id": 2,
+            "title": "AUC-ROC",
+            "type": "gauge",
+            "gridPos": {
+                "h": 8,
+                "w": 6,
+                "x": 6,
+                "y": 0
+            },
+            "targets": [
+                {
+                    "expr": "fraudex_auc_roc",
+                    "legendFormat": "AUC-ROC",
+                    "refId": "A"
+                }
+            ],
+            "fieldConfig": {
+                "defaults": {
+                    "unit": "percentunit",
+                    "min": 0,
+                    "max": 1,
+                    "thresholds": {
+                        "steps": [
+                            {
+                                "color": "red",
+                                "value": null
+                            },
+                            {
+                                "color": "yellow",
+                                "value": 0.85
+                            },
+                            {
+                                "color": "green",
+                                "value": 0.90
+                            }
+                        ]
+                    }
+                }
+            }
+        },
+        {
+            "id": 3,
+            "title": "F1 Score",
+            "type": "gauge",
+            "gridPos": {
+                "h": 8,
+                "w": 6,
+                "x": 12,
+                "y": 0
+            },
+            "targets": [
+                {
+                    "expr": "fraudex_f1_score",
+                    "legendFormat": "F1",
+                    "refId": "A"
+                }
+            ],
+            "fieldConfig": {
+                "defaults": {
+                    "unit": "percentunit",
+                    "min": 0,
+                    "max": 1,
+                    "thresholds": {
+                        "steps": [
+                            {
+                                "color": "red",
+                                "value": null
+                            },
+                            {
+                                "color": "yellow",
+                                "value": 0.40
+                            },
+                            {
+                                "color": "green",
+                                "value": 0.60
+                            }
+                        ]
+                    }
+                }
+            }
+        },
+        {
+            "id": 4,
+            "title": "False Positive Rate",
+            "type": "gauge",
+            "gridPos": {
+                "h": 8,
+                "w": 6,
+                "x": 18,
+                "y": 0
+            },
+            "targets": [
+                {
+                    "expr": "fraudex_false_positive_rate",
+                    "legendFormat": "FPR",
+                    "refId": "A"
+                }
+            ],
+            "fieldConfig": {
+                "defaults": {
+                    "unit": "percentunit",
+                    "min": 0,
+                    "max": 1,
+                    "thresholds": {
+                        "steps": [
+                            {
+                                "color": "green",
+                                "value": null
+                            },
+                            {
+                                "color": "yellow",
+                                "value": 0.20
+                            },
+                            {
+                                "color": "red",
+                                "value": 0.30
+                            }
+                        ]
+                    }
+                }
+            }
+        },
+        {
+            "id": 5,
+            "title": "Recall Trend Over Time",
+            "type": "timeseries",
+            "gridPos": {
+                "h": 8,
+                "w": 24,
+                "x": 0,
+                "y": 8
+            },
+            "targets": [
+                {
+                    "expr": "fraudex_fraud_recall",
+                    "legendFormat": "Recall",
+                    "refId": "A"
+                },
+                {
+                    "expr": "fraudex_auc_roc",
+                    "legendFormat": "AUC-ROC",
+                    "refId": "B"
+                }
+            ],
+            "fieldConfig": {
+                "defaults": {
+                    "unit": "percentunit",
+                    "min": 0,
+                    "max": 1
+                }
+            }
+        },
+        {
+            "id": 6,
+            "title": "Fraud Detection Rate",
+            "type": "timeseries",
+            "gridPos": {
+                "h": 8,
+                "w": 24,
+                "x": 0,
+                "y": 16
+            },
+            "targets": [
+                {
+                    "expr": "rate(fraudex_fraud_predictions_total[5m])",
+                    "legendFormat": "Fraud Predictions/sec",
+                    "refId": "A"
+                },
+                {
+                    "expr": "rate(fraudex_requests_total[5m])",
+                    "legendFormat": "Total Requests/sec",
+                    "refId": "B"
+                }
+            ],
+            "fieldConfig": {
+                "defaults": {
+                    "unit": "reqps"
+                }
+            }
+        }
+    ]
+}

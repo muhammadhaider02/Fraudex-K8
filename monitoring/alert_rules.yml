@@ -1,0 +1,91 @@
+groups:
+  # ── Model Performance Alerts ───────────────────────
+  - name: model_performance
+    rules:
+      - alert: FraudRecallDrop
+        expr: fraudex_fraud_recall < 0.75
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Fraud recall dropped below threshold"
+          description: "Fraud recall is {{ $value | humanizePercentage }}, below the 0.75 threshold. Retraining required."
+
+      - alert: HighFalsePositiveRate
+        expr: fraudex_false_positive_rate > 0.30
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High false positive rate detected"
+          description: "False positive rate is {{ $value | humanizePercentage }}, exceeding 30%."
+
+      - alert: LowAUCROC
+        expr: fraudex_auc_roc < 0.85
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "AUC-ROC dropped below acceptable threshold"
+          description: "AUC-ROC is {{ $value }}, below 0.85. Model performance degraded."
+
+  # ── Data Drift Alerts ──────────────────────────────
+  - name: data_drift
+    rules:
+      - alert: TransactionAmtDrift
+        expr: fraudex_feature_drift_score{feature="TransactionAmt"} > 0.10
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Data drift detected in TransactionAmt"
+          description: "TransactionAmt distribution drift score is {{ $value }}, exceeding 0.10 threshold."
+
+      - alert: HighMissingValueRate
+        expr: fraudex_missing_value_rate > 0.40
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Missing value rate spike detected"
+          description: "Missing value rate is {{ $value | humanizePercentage }}, above expected baseline."
+
+  # ── API System Alerts ──────────────────────────────
+  - name: system
+    rules:
+      - alert: HighAPILatency
+        expr: rate(fraudex_request_duration_seconds_sum[5m]) / rate(fraudex_request_duration_seconds_count[5m]) > 2.0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Inference API latency is high"
+          description: "Average request latency is {{ $value }}s, exceeding 2 second threshold."
+
+      - alert: HighErrorRate
+        expr: rate(fraudex_request_errors_total[5m]) / rate(fraudex_requests_total[5m]) > 0.05
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "High error rate on inference API"
+          description: "Error rate is {{ $value | humanizePercentage }}, exceeding 5%."
+
+      - alert: HighCPUUsage
+        expr: 100 - (avg(rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100) > 90
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "CPU usage is critically high"
+          description: "CPU usage is {{ $value }}%, exceeding 90%."
+
+      - alert: HighMemoryUsage
+        expr: (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100 > 90
+        for: 10m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Memory usage is critically high"
+          description: "Memory usage is {{ $value }}%, exceeding 90%."
+          

@@ -1,0 +1,187 @@
+{
+    "id": null,
+    "uid": "fraudex-data-drift",
+    "title": "Fraudex - Data Drift",
+    "tags": [
+        "fraudex",
+        "drift"
+    ],
+    "timezone": "browser",
+    "schemaVersion": 38,
+    "version": 1,
+    "refresh": "1m",
+    "panels": [
+        {
+            "id": 1,
+            "title": "Feature Drift Scores",
+            "type": "bargauge",
+            "gridPos": {
+                "h": 8,
+                "w": 24,
+                "x": 0,
+                "y": 0
+            },
+            "targets": [
+                {
+                    "expr": "fraudex_feature_drift_score",
+                    "legendFormat": "{{ feature }}",
+                    "refId": "A"
+                }
+            ],
+            "fieldConfig": {
+                "defaults": {
+                    "unit": "short",
+                    "min": 0,
+                    "max": 1,
+                    "thresholds": {
+                        "steps": [
+                            {
+                                "color": "green",
+                                "value": null
+                            },
+                            {
+                                "color": "yellow",
+                                "value": 0.05
+                            },
+                            {
+                                "color": "red",
+                                "value": 0.10
+                            }
+                        ]
+                    }
+                }
+            }
+        },
+        {
+            "id": 2,
+            "title": "TransactionAmt Distribution Drift",
+            "type": "timeseries",
+            "gridPos": {
+                "h": 8,
+                "w": 12,
+                "x": 0,
+                "y": 8
+            },
+            "targets": [
+                {
+                    "expr": "fraudex_feature_drift_score{feature='TransactionAmt'}",
+                    "legendFormat": "TransactionAmt Drift",
+                    "refId": "A"
+                }
+            ],
+            "fieldConfig": {
+                "defaults": {
+                    "unit": "short",
+                    "thresholds": {
+                        "steps": [
+                            {
+                                "color": "green",
+                                "value": null
+                            },
+                            {
+                                "color": "yellow",
+                                "value": 0.05
+                            },
+                            {
+                                "color": "red",
+                                "value": 0.10
+                            }
+                        ]
+                    }
+                }
+            }
+        },
+        {
+            "id": 3,
+            "title": "Missing Value Rate Trend",
+            "type": "timeseries",
+            "gridPos": {
+                "h": 8,
+                "w": 12,
+                "x": 12,
+                "y": 8
+            },
+            "targets": [
+                {
+                    "expr": "fraudex_missing_value_rate",
+                    "legendFormat": "Missing Value Rate",
+                    "refId": "A"
+                }
+            ],
+            "fieldConfig": {
+                "defaults": {
+                    "unit": "percentunit",
+                    "thresholds": {
+                        "steps": [
+                            {
+                                "color": "green",
+                                "value": null
+                            },
+                            {
+                                "color": "yellow",
+                                "value": 0.30
+                            },
+                            {
+                                "color": "red",
+                                "value": 0.40
+                            }
+                        ]
+                    }
+                }
+            }
+        },
+        {
+            "id": 4,
+            "title": "Input Data Anomaly Count",
+            "type": "timeseries",
+            "gridPos": {
+                "h": 8,
+                "w": 24,
+                "x": 0,
+                "y": 16
+            },
+            "targets": [
+                {
+                    "expr": "rate(fraudex_input_anomalies_total[5m])",
+                    "legendFormat": "Anomalies/sec",
+                    "refId": "A"
+                }
+            ],
+            "fieldConfig": {
+                "defaults": {
+                    "unit": "short"
+                }
+            }
+        },
+        {
+            "id": 5,
+            "title": "Prediction Confidence Distribution",
+            "type": "timeseries",
+            "gridPos": {
+                "h": 8,
+                "w": 24,
+                "x": 0,
+                "y": 24
+            },
+            "targets": [
+                {
+                    "expr": "histogram_quantile(0.50, rate(fraudex_prediction_confidence_bucket[5m]))",
+                    "legendFormat": "p50 Confidence",
+                    "refId": "A"
+                },
+                {
+                    "expr": "histogram_quantile(0.95, rate(fraudex_prediction_confidence_bucket[5m]))",
+                    "legendFormat": "p95 Confidence",
+                    "refId": "B"
+                }
+            ],
+            "fieldConfig": {
+                "defaults": {
+                    "unit": "percentunit",
+                    "min": 0,
+                    "max": 1
+                }
+            }
+        }
+    ]
+}
