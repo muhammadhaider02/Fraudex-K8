@@ -303,7 +303,6 @@ def evaluate(
     import boto3
     import requests
     import pandas as pd
-    import numpy as np
     import shap
     import matplotlib.pyplot as plt
     from sklearn.metrics import (

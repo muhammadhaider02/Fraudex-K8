@@ -198,42 +198,41 @@ deploymentSpec:
           \ Output[Metrics],\n    s3_bucket: str,\n    run_id: str,\n    inference_api_url:\
           \ str = \"http://localhost:8000\",\n    recall_threshold: float = 0.75,\n\
           ):\n    import joblib\n    import boto3\n    import requests\n    import\
-          \ pandas as pd\n    import numpy as np\n    import shap\n    import matplotlib.pyplot\
-          \ as plt\n    from sklearn.metrics import (\n        roc_auc_score,\n  \
-          \      precision_recall_fscore_support,\n        confusion_matrix,\n   \
-          \ )\n\n    df = pd.read_csv(input_test.path)\n    X_test = df.drop(columns=[\"\
-          isFraud\"])\n    y_test = df[\"isFraud\"]\n\n    models = {\n        \"\
-          XGBoost\": joblib.load(model_xgb.path),\n        \"LightGBM\": joblib.load(model_lgbm.path),\n\
-          \        \"Hybrid\": joblib.load(model_hybrid.path),\n    }\n\n    best_model\
-          \ = None\n    best_recall = 0.0\n    best_f, best_auc = 0.0, 0.0\n\n   \
-          \ for name, model in models.items():\n        y_pred = model.predict(X_test)\n\
-          \        y_prob = (\n            model.predict_proba(X_test)[:, 1]\n   \
-          \         if hasattr(model, \"predict_proba\")\n            else y_pred\n\
-          \        )\n\n        p, r, f, _ = precision_recall_fscore_support(\n  \
-          \          y_test, y_pred, average=\"binary\"\n        )\n        auc =\
-          \ roc_auc_score(y_test, y_prob)\n        cm = confusion_matrix(y_test, y_pred).tolist()\n\
-          \n        print(f\"\\n{'='*40}\")\n        print(f\"Model: {name}\")\n \
-          \       print(f\"  Precision : {p:.4f}\")\n        print(f\"  Recall   \
-          \ : {r:.4f}\")\n        print(f\"  F1        : {f:.4f}\")\n        print(f\"\
-          \  AUC-ROC   : {auc:.4f}\")\n        print(f\"  Confusion Matrix: {cm}\"\
-          )\n\n        if r > best_recall:\n            best_recall = r\n        \
-          \    best_model = name\n            best_f, best_auc = f, auc\n\n    # Compute\
-          \ false positive rate from best model\n    best_model_obj = models[best_model]\n\
-          \    y_pred_best = best_model_obj.predict(X_test)\n    tn = int(((y_pred_best\
-          \ == 0) & (y_test == 0)).sum())\n    fp = int(((y_pred_best == 1) & (y_test\
-          \ == 0)).sum())\n    fpr = round(fp / (fp + tn), 4) if (fp + tn) > 0 else\
-          \ 0.0\n\n    metrics.log_metric(\"best_model\", best_model)\n    metrics.log_metric(\"\
-          best_recall\", best_recall)\n    metrics.log_metric(\"best_f1\", best_f)\n\
-          \    metrics.log_metric(\"best_auc_roc\", best_auc)\n    metrics.log_metric(\"\
-          false_positive_rate\", fpr)\n\n    print(f\"\\nBest model by recall: {best_model}\
-          \ ({best_recall:.4f})\")\n    print(f\"False positive rate: {fpr:.4f}\"\
-          )\n\n    # SHAP on XGBoost\n    print(\"\\nRunning SHAP analysis on XGBoost...\"\
-          )\n    xgb_model = models[\"XGBoost\"]\n    explainer = shap.TreeExplainer(xgb_model)\n\
-          \    sample = X_test.sample(min(500, len(X_test)), random_state=42)\n  \
-          \  shap_values = explainer.shap_values(sample)\n\n    shap_path = \"/tmp/shap_summary.png\"\
-          \n    plt.figure()\n    shap.summary_plot(shap_values, sample, show=False,\
-          \ max_display=20)\n    plt.tight_layout()\n    plt.savefig(shap_path, dpi=100)\n\
-          \    print(\"SHAP summary saved locally.\")\n\n    s3 = boto3.client(\"\
+          \ pandas as pd\n    import shap\n    import matplotlib.pyplot as plt\n \
+          \   from sklearn.metrics import (\n        roc_auc_score,\n        precision_recall_fscore_support,\n\
+          \        confusion_matrix,\n    )\n\n    df = pd.read_csv(input_test.path)\n\
+          \    X_test = df.drop(columns=[\"isFraud\"])\n    y_test = df[\"isFraud\"\
+          ]\n\n    models = {\n        \"XGBoost\": joblib.load(model_xgb.path),\n\
+          \        \"LightGBM\": joblib.load(model_lgbm.path),\n        \"Hybrid\"\
+          : joblib.load(model_hybrid.path),\n    }\n\n    best_model = None\n    best_recall\
+          \ = 0.0\n    best_f, best_auc = 0.0, 0.0\n\n    for name, model in models.items():\n\
+          \        y_pred = model.predict(X_test)\n        y_prob = (\n          \
+          \  model.predict_proba(X_test)[:, 1]\n            if hasattr(model, \"predict_proba\"\
+          )\n            else y_pred\n        )\n\n        p, r, f, _ = precision_recall_fscore_support(\n\
+          \            y_test, y_pred, average=\"binary\"\n        )\n        auc\
+          \ = roc_auc_score(y_test, y_prob)\n        cm = confusion_matrix(y_test,\
+          \ y_pred).tolist()\n\n        print(f\"\\n{'='*40}\")\n        print(f\"\
+          Model: {name}\")\n        print(f\"  Precision : {p:.4f}\")\n        print(f\"\
+          \  Recall    : {r:.4f}\")\n        print(f\"  F1        : {f:.4f}\")\n \
+          \       print(f\"  AUC-ROC   : {auc:.4f}\")\n        print(f\"  Confusion\
+          \ Matrix: {cm}\")\n\n        if r > best_recall:\n            best_recall\
+          \ = r\n            best_model = name\n            best_f, best_auc = f,\
+          \ auc\n\n    # Compute false positive rate from best model\n    best_model_obj\
+          \ = models[best_model]\n    y_pred_best = best_model_obj.predict(X_test)\n\
+          \    tn = int(((y_pred_best == 0) & (y_test == 0)).sum())\n    fp = int(((y_pred_best\
+          \ == 1) & (y_test == 0)).sum())\n    fpr = round(fp / (fp + tn), 4) if (fp\
+          \ + tn) > 0 else 0.0\n\n    metrics.log_metric(\"best_model\", best_model)\n\
+          \    metrics.log_metric(\"best_recall\", best_recall)\n    metrics.log_metric(\"\
+          best_f1\", best_f)\n    metrics.log_metric(\"best_auc_roc\", best_auc)\n\
+          \    metrics.log_metric(\"false_positive_rate\", fpr)\n\n    print(f\"\\\
+          nBest model by recall: {best_model} ({best_recall:.4f})\")\n    print(f\"\
+          False positive rate: {fpr:.4f}\")\n\n    # SHAP on XGBoost\n    print(\"\
+          \\nRunning SHAP analysis on XGBoost...\")\n    xgb_model = models[\"XGBoost\"\
+          ]\n    explainer = shap.TreeExplainer(xgb_model)\n    sample = X_test.sample(min(500,\
+          \ len(X_test)), random_state=42)\n    shap_values = explainer.shap_values(sample)\n\
+          \n    shap_path = \"/tmp/shap_summary.png\"\n    plt.figure()\n    shap.summary_plot(shap_values,\
+          \ sample, show=False, max_display=20)\n    plt.tight_layout()\n    plt.savefig(shap_path,\
+          \ dpi=100)\n    print(\"SHAP summary saved locally.\")\n\n    s3 = boto3.client(\"\
           s3\")\n    s3.upload_file(shap_path, s3_bucket, f\"artifacts/shap/shap_summary_{run_id}.png\"\
           )\n    print(f\"SHAP plot uploaded to s3://{s3_bucket}/artifacts/shap/shap_summary_{run_id}.png\"\
           )\n\n    # Compute feature drift scores vs baseline TransactionAmt mean\n\
