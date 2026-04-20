@@ -285,6 +285,7 @@ def train(
         "shap",
         "matplotlib",
         "boto3",
+        "requests",
     ],
 )
 def evaluate(
@@ -295,11 +296,14 @@ def evaluate(
     metrics: Output[Metrics],
     s3_bucket: str,
     run_id: str,
+    inference_api_url: str = "http://localhost:8000",
     recall_threshold: float = 0.75,
 ):
     import joblib
     import boto3
+    import requests
     import pandas as pd
+    import numpy as np
     import shap
     import matplotlib.pyplot as plt
     from sklearn.metrics import (
@@ -349,12 +353,21 @@ def evaluate(
             best_model = name
             best_f, best_auc = f, auc
 
+    # Compute false positive rate from best model
+    best_model_obj = models[best_model]
+    y_pred_best = best_model_obj.predict(X_test)
+    tn = int(((y_pred_best == 0) & (y_test == 0)).sum())
+    fp = int(((y_pred_best == 1) & (y_test == 0)).sum())
+    fpr = round(fp / (fp + tn), 4) if (fp + tn) > 0 else 0.0
+
     metrics.log_metric("best_model", best_model)
     metrics.log_metric("best_recall", best_recall)
     metrics.log_metric("best_f1", best_f)
     metrics.log_metric("best_auc_roc", best_auc)
+    metrics.log_metric("false_positive_rate", fpr)
 
     print(f"\nBest model by recall: {best_model} ({best_recall:.4f})")
+    print(f"False positive rate: {fpr:.4f}")
 
     # SHAP on XGBoost
     print("\nRunning SHAP analysis on XGBoost...")
@@ -373,6 +386,37 @@ def evaluate(
     s3 = boto3.client("s3")
     s3.upload_file(shap_path, s3_bucket, f"artifacts/shap/shap_summary_{run_id}.png")
     print(f"SHAP plot uploaded to s3://{s3_bucket}/artifacts/shap/shap_summary_{run_id}.png")
+
+    # Compute feature drift scores vs baseline TransactionAmt mean
+    drift_scores = {}
+    baseline_mean = 100.0
+    if "TransactionAmt" in X_test.columns:
+        current_mean = float(X_test["TransactionAmt"].mean())
+        drift_scores["TransactionAmt"] = round(abs(current_mean - baseline_mean) / baseline_mean, 4)
+    if "card1" in X_test.columns:
+        drift_scores["card1"] = round(float(X_test["card1"].std()) / 10000, 4)
+    if "addr1" in X_test.columns:
+        drift_scores["addr1"] = round(float(X_test["addr1"].std()) / 500, 4)
+
+    missing_rate = round(float(df.isnull().mean().mean()), 4)
+
+    # Push metrics to inference API
+    payload = {
+        "recall": round(best_recall, 6),
+        "auc_roc": round(best_auc, 6),
+        "f1": round(best_f, 6),
+        "false_positive_rate": fpr,
+        "feature_drift": drift_scores,
+        "missing_value_rate": missing_rate,
+    }
+
+    try:
+        resp = requests.post(f"{inference_api_url}/update-metrics", json=payload, timeout=10)
+        print(f"Metrics pushed to inference API: {resp.status_code}")
+        print(f"Payload: {payload}")
+    except Exception as e:
+        print(f"Warning: Failed to push metrics to inference API: {e}")
+        print("Metrics will not be updated in Prometheus/Grafana for this run.")
 
     decision = "true" if best_recall >= recall_threshold else "false"
     print(f"\nDeploy decision: {decision} (threshold={recall_threshold})")
@@ -402,6 +446,7 @@ def fraudex_pipeline(
     imbalance_strategy: str = "smote",
     cost_sensitive: bool = True,
     recall_threshold: float = 0.75,
+    inference_api_url: str = "http://localhost:8000",
 ):
     # Step 1: Ingest
     ingest_task = ingest(
@@ -448,6 +493,7 @@ def fraudex_pipeline(
         model_hybrid=train_task.outputs["output_model_hybrid"],
         s3_bucket=s3_bucket,
         run_id=run_id,
+        inference_api_url=inference_api_url,
         recall_threshold=recall_threshold,
     )
     evaluate_task.set_memory_limit("8G")

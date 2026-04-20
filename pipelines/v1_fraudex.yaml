@@ -4,6 +4,7 @@
 # Inputs:
 #    cost_sensitive: bool [Default: True]
 #    imbalance_strategy: str [Default: 'smote']
+#    inference_api_url: str [Default: 'http://localhost:8000']
 #    missing_threshold: float [Default: 0.5]
 #    recall_threshold: float [Default: 0.75]
 #    run_id: str [Default: 'run-1']
@@ -33,6 +34,10 @@ components:
             schemaTitle: system.Model
             schemaVersion: 0.0.1
       parameters:
+        inference_api_url:
+          defaultValue: http://localhost:8000
+          isOptional: true
+          parameterType: STRING
         recall_threshold:
           defaultValue: 0.75
           isOptional: true
@@ -174,9 +179,9 @@ deploymentSpec:
           \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
           \ python3 -m pip install --quiet --no-warn-script-location 'pandas' 'numpy'\
           \ 'scikit-learn' 'xgboost' 'lightgbm' 'joblib' 'shap' 'matplotlib' 'boto3'\
-          \  &&  python3 -m pip install --quiet --no-warn-script-location 'kfp==2.15.0'\
-          \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"' && \"\
-          $0\" \"$@\"\n"
+          \ 'requests'  &&  python3 -m pip install --quiet --no-warn-script-location\
+          \ 'kfp==2.15.0' '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"\
+          3.9\"' && \"$0\" \"$@\"\n"
         - sh
         - -ec
         - 'program_path=$(mktemp -d)
@@ -190,33 +195,40 @@ deploymentSpec:
         - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
           \ *\n\ndef evaluate(\n    input_test: Input[Dataset],\n    model_xgb: Input[Model],\n\
           \    model_lgbm: Input[Model],\n    model_hybrid: Input[Model],\n    metrics:\
-          \ Output[Metrics],\n    s3_bucket: str,\n    run_id: str,\n    recall_threshold:\
-          \ float = 0.75,\n):\n    import joblib\n    import boto3\n    import pandas\
-          \ as pd\n    import shap\n    import matplotlib.pyplot as plt\n    from\
-          \ sklearn.metrics import (\n        roc_auc_score,\n        precision_recall_fscore_support,\n\
-          \        confusion_matrix,\n    )\n\n    df = pd.read_csv(input_test.path)\n\
-          \    X_test = df.drop(columns=[\"isFraud\"])\n    y_test = df[\"isFraud\"\
-          ]\n\n    models = {\n        \"XGBoost\": joblib.load(model_xgb.path),\n\
-          \        \"LightGBM\": joblib.load(model_lgbm.path),\n        \"Hybrid\"\
-          : joblib.load(model_hybrid.path),\n    }\n\n    best_model = None\n    best_recall\
-          \ = 0.0\n    best_f, best_auc = 0.0, 0.0\n\n    for name, model in models.items():\n\
-          \        y_pred = model.predict(X_test)\n        y_prob = (\n          \
-          \  model.predict_proba(X_test)[:, 1]\n            if hasattr(model, \"predict_proba\"\
-          )\n            else y_pred\n        )\n\n        p, r, f, _ = precision_recall_fscore_support(\n\
-          \            y_test, y_pred, average=\"binary\"\n        )\n        auc\
-          \ = roc_auc_score(y_test, y_prob)\n        cm = confusion_matrix(y_test,\
-          \ y_pred).tolist()\n\n        print(f\"\\n{'='*40}\")\n        print(f\"\
-          Model: {name}\")\n        print(f\"  Precision : {p:.4f}\")\n        print(f\"\
-          \  Recall    : {r:.4f}\")\n        print(f\"  F1        : {f:.4f}\")\n \
-          \       print(f\"  AUC-ROC   : {auc:.4f}\")\n        print(f\"  Confusion\
-          \ Matrix: {cm}\")\n\n        if r > best_recall:\n            best_recall\
-          \ = r\n            best_model = name\n            best_f, best_auc = f,\
-          \ auc\n\n    metrics.log_metric(\"best_model\", best_model)\n    metrics.log_metric(\"\
+          \ Output[Metrics],\n    s3_bucket: str,\n    run_id: str,\n    inference_api_url:\
+          \ str = \"http://localhost:8000\",\n    recall_threshold: float = 0.75,\n\
+          ):\n    import joblib\n    import boto3\n    import requests\n    import\
+          \ pandas as pd\n    import numpy as np\n    import shap\n    import matplotlib.pyplot\
+          \ as plt\n    from sklearn.metrics import (\n        roc_auc_score,\n  \
+          \      precision_recall_fscore_support,\n        confusion_matrix,\n   \
+          \ )\n\n    df = pd.read_csv(input_test.path)\n    X_test = df.drop(columns=[\"\
+          isFraud\"])\n    y_test = df[\"isFraud\"]\n\n    models = {\n        \"\
+          XGBoost\": joblib.load(model_xgb.path),\n        \"LightGBM\": joblib.load(model_lgbm.path),\n\
+          \        \"Hybrid\": joblib.load(model_hybrid.path),\n    }\n\n    best_model\
+          \ = None\n    best_recall = 0.0\n    best_f, best_auc = 0.0, 0.0\n\n   \
+          \ for name, model in models.items():\n        y_pred = model.predict(X_test)\n\
+          \        y_prob = (\n            model.predict_proba(X_test)[:, 1]\n   \
+          \         if hasattr(model, \"predict_proba\")\n            else y_pred\n\
+          \        )\n\n        p, r, f, _ = precision_recall_fscore_support(\n  \
+          \          y_test, y_pred, average=\"binary\"\n        )\n        auc =\
+          \ roc_auc_score(y_test, y_prob)\n        cm = confusion_matrix(y_test, y_pred).tolist()\n\
+          \n        print(f\"\\n{'='*40}\")\n        print(f\"Model: {name}\")\n \
+          \       print(f\"  Precision : {p:.4f}\")\n        print(f\"  Recall   \
+          \ : {r:.4f}\")\n        print(f\"  F1        : {f:.4f}\")\n        print(f\"\
+          \  AUC-ROC   : {auc:.4f}\")\n        print(f\"  Confusion Matrix: {cm}\"\
+          )\n\n        if r > best_recall:\n            best_recall = r\n        \
+          \    best_model = name\n            best_f, best_auc = f, auc\n\n    # Compute\
+          \ false positive rate from best model\n    best_model_obj = models[best_model]\n\
+          \    y_pred_best = best_model_obj.predict(X_test)\n    tn = int(((y_pred_best\
+          \ == 0) & (y_test == 0)).sum())\n    fp = int(((y_pred_best == 1) & (y_test\
+          \ == 0)).sum())\n    fpr = round(fp / (fp + tn), 4) if (fp + tn) > 0 else\
+          \ 0.0\n\n    metrics.log_metric(\"best_model\", best_model)\n    metrics.log_metric(\"\
           best_recall\", best_recall)\n    metrics.log_metric(\"best_f1\", best_f)\n\
-          \    metrics.log_metric(\"best_auc_roc\", best_auc)\n\n    print(f\"\\nBest\
-          \ model by recall: {best_model} ({best_recall:.4f})\")\n\n    # SHAP on\
-          \ XGBoost\n    print(\"\\nRunning SHAP analysis on XGBoost...\")\n    xgb_model\
-          \ = models[\"XGBoost\"]\n    explainer = shap.TreeExplainer(xgb_model)\n\
+          \    metrics.log_metric(\"best_auc_roc\", best_auc)\n    metrics.log_metric(\"\
+          false_positive_rate\", fpr)\n\n    print(f\"\\nBest model by recall: {best_model}\
+          \ ({best_recall:.4f})\")\n    print(f\"False positive rate: {fpr:.4f}\"\
+          )\n\n    # SHAP on XGBoost\n    print(\"\\nRunning SHAP analysis on XGBoost...\"\
+          )\n    xgb_model = models[\"XGBoost\"]\n    explainer = shap.TreeExplainer(xgb_model)\n\
           \    sample = X_test.sample(min(500, len(X_test)), random_state=42)\n  \
           \  shap_values = explainer.shap_values(sample)\n\n    shap_path = \"/tmp/shap_summary.png\"\
           \n    plt.figure()\n    shap.summary_plot(shap_values, sample, show=False,\
@@ -224,12 +236,31 @@ deploymentSpec:
           \    print(\"SHAP summary saved locally.\")\n\n    s3 = boto3.client(\"\
           s3\")\n    s3.upload_file(shap_path, s3_bucket, f\"artifacts/shap/shap_summary_{run_id}.png\"\
           )\n    print(f\"SHAP plot uploaded to s3://{s3_bucket}/artifacts/shap/shap_summary_{run_id}.png\"\
-          )\n\n    decision = \"true\" if best_recall >= recall_threshold else \"\
-          false\"\n    print(f\"\\nDeploy decision: {decision} (threshold={recall_threshold})\"\
-          )\n\n    if decision == \"true\":\n        print(\"Deploy decision: PASS\
-          \ - Model meets recall threshold.\")\n        print(\"Model registered successfully.\"\
-          )\n    else:\n        print(\"Deploy decision: FAIL - Recall below threshold.\"\
-          )\n        print(\"Pipeline flagged for review.\")\n\n"
+          )\n\n    # Compute feature drift scores vs baseline TransactionAmt mean\n\
+          \    drift_scores = {}\n    baseline_mean = 100.0\n    if \"TransactionAmt\"\
+          \ in X_test.columns:\n        current_mean = float(X_test[\"TransactionAmt\"\
+          ].mean())\n        drift_scores[\"TransactionAmt\"] = round(abs(current_mean\
+          \ - baseline_mean) / baseline_mean, 4)\n    if \"card1\" in X_test.columns:\n\
+          \        drift_scores[\"card1\"] = round(float(X_test[\"card1\"].std())\
+          \ / 10000, 4)\n    if \"addr1\" in X_test.columns:\n        drift_scores[\"\
+          addr1\"] = round(float(X_test[\"addr1\"].std()) / 500, 4)\n\n    missing_rate\
+          \ = round(float(df.isnull().mean().mean()), 4)\n\n    # Push metrics to\
+          \ inference API\n    payload = {\n        \"recall\": round(best_recall,\
+          \ 6),\n        \"auc_roc\": round(best_auc, 6),\n        \"f1\": round(best_f,\
+          \ 6),\n        \"false_positive_rate\": fpr,\n        \"feature_drift\"\
+          : drift_scores,\n        \"missing_value_rate\": missing_rate,\n    }\n\n\
+          \    try:\n        resp = requests.post(f\"{inference_api_url}/update-metrics\"\
+          , json=payload, timeout=10)\n        print(f\"Metrics pushed to inference\
+          \ API: {resp.status_code}\")\n        print(f\"Payload: {payload}\")\n \
+          \   except Exception as e:\n        print(f\"Warning: Failed to push metrics\
+          \ to inference API: {e}\")\n        print(\"Metrics will not be updated\
+          \ in Prometheus/Grafana for this run.\")\n\n    decision = \"true\" if best_recall\
+          \ >= recall_threshold else \"false\"\n    print(f\"\\nDeploy decision: {decision}\
+          \ (threshold={recall_threshold})\")\n\n    if decision == \"true\":\n  \
+          \      print(\"Deploy decision: PASS - Model meets recall threshold.\")\n\
+          \        print(\"Model registered successfully.\")\n    else:\n        print(\"\
+          Deploy decision: FAIL - Recall below threshold.\")\n        print(\"Pipeline\
+          \ flagged for review.\")\n\n"
         image: python:3.11.9
         resources:
           memoryLimit: 8.0
@@ -509,6 +540,8 @@ root:
                 outputArtifactKey: output_model_xgb
                 producerTask: train
           parameters:
+            inference_api_url:
+              componentInputParameter: inference_api_url
             recall_threshold:
               componentInputParameter: recall_threshold
             run_id:
@@ -625,6 +658,10 @@ root:
         parameterType: BOOLEAN
       imbalance_strategy:
         defaultValue: smote
+        isOptional: true
+        parameterType: STRING
+      inference_api_url:
+        defaultValue: http://localhost:8000
         isOptional: true
         parameterType: STRING
       missing_threshold:
