@@ -180,26 +180,10 @@ jobs:
             echo "$RUN_OUTPUT"
             echo "Pipeline triggered successfully"
 
-            # ── Deploy inference API ──────────────────────
-            echo "Deploying inference API..."
-
-            export PATH=$PATH:/home/ubuntu/.local/bin
-
-            python3 -c "import uvicorn" 2>/dev/null || pip3 install fastapi uvicorn boto3 joblib scikit-learn xgboost lightgbm --quiet
-
-            pkill -f "uvicorn app:app" || true
-            sleep 2
-
-            cd ~/Fraudex-K8/docker/inference
-            nohup /home/ubuntu/.local/bin/uvicorn app:app --host 0.0.0.0 --port 8000 > /tmp/inference.log 2>&1 &
-            disown
-
-            sleep 5
-            if curl -s http://localhost:8000/health | grep -q "ok"; then
-              echo "Inference API deployed successfully on port 8000"
-            else
-              echo "Inference API health check failed"
-              cat /tmp/inference.log
-              exit 1
-            fi
+            # ── Deploy inference API via systemd ──────────
+            echo "Restarting inference API..."
+            sudo systemctl restart fraudex-inference
+            sleep 3
+            curl -s http://localhost:8000/health
+            echo "Inference API deployed successfully"
             
