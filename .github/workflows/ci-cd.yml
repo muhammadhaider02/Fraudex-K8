@@ -161,7 +161,7 @@ jobs:
             import kfp
             client = kfp.Client(host='http://localhost:8080')
             run = client.create_run_from_pipeline_package(
-                'pipelines/v1_fraudex.yaml',
+                'pipelines/v2_fraudex.yaml',
                 arguments={
                     's3_bucket': 'fraudex-k8',
                     's3_transaction_key': 'data/train_transaction.csv',

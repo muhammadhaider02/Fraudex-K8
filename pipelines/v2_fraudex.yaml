@@ -1,0 +1,707 @@
+# PIPELINE DEFINITION
+# Name: fraudex-pipeline-v2-drift-simulation
+# Description: Fraud detection pipeline with temporal split and drift simulation
+# Inputs:
+#    cost_sensitive: bool [Default: True]
+#    imbalance_strategy: str [Default: 'smote']
+#    inference_api_url: str [Default: 'http://localhost:8000']
+#    missing_threshold: float [Default: 0.5]
+#    recall_threshold: float [Default: 0.75]
+#    run_id: str [Default: 'drift-run-1']
+#    s3_bucket: str [Default: 'fraudex-k8']
+#    s3_identity_key: str [Default: 'data/train_identity.csv']
+#    s3_transaction_key: str [Default: 'data/train_transaction.csv']
+#    train_frac: float [Default: 0.7]
+components:
+  comp-evaluate:
+    executorLabel: exec-evaluate
+    inputDefinitions:
+      artifacts:
+        input_test:
+          artifactType:
+            schemaTitle: system.Dataset
+            schemaVersion: 0.0.1
+        model_hybrid:
+          artifactType:
+            schemaTitle: system.Model
+            schemaVersion: 0.0.1
+        model_lgbm:
+          artifactType:
+            schemaTitle: system.Model
+            schemaVersion: 0.0.1
+        model_xgb:
+          artifactType:
+            schemaTitle: system.Model
+            schemaVersion: 0.0.1
+      parameters:
+        inference_api_url:
+          defaultValue: http://localhost:8000
+          isOptional: true
+          parameterType: STRING
+        recall_threshold:
+          defaultValue: 0.75
+          isOptional: true
+          parameterType: NUMBER_DOUBLE
+        run_id:
+          parameterType: STRING
+        s3_bucket:
+          parameterType: STRING
+    outputDefinitions:
+      artifacts:
+        metrics:
+          artifactType:
+            schemaTitle: system.Metrics
+            schemaVersion: 0.0.1
+  comp-feature-engineering-drift:
+    executorLabel: exec-feature-engineering-drift
+    inputDefinitions:
+      artifacts:
+        input_data:
+          artifactType:
+            schemaTitle: system.Dataset
+            schemaVersion: 0.0.1
+      parameters:
+        train_frac:
+          defaultValue: 0.7
+          isOptional: true
+          parameterType: NUMBER_DOUBLE
+    outputDefinitions:
+      artifacts:
+        output_test:
+          artifactType:
+            schemaTitle: system.Dataset
+            schemaVersion: 0.0.1
+        output_train:
+          artifactType:
+            schemaTitle: system.Dataset
+            schemaVersion: 0.0.1
+  comp-ingest:
+    executorLabel: exec-ingest
+    inputDefinitions:
+      parameters:
+        s3_bucket:
+          parameterType: STRING
+        s3_identity_key:
+          parameterType: STRING
+        s3_transaction_key:
+          parameterType: STRING
+    outputDefinitions:
+      artifacts:
+        output_data:
+          artifactType:
+            schemaTitle: system.Dataset
+            schemaVersion: 0.0.1
+  comp-preprocess:
+    executorLabel: exec-preprocess
+    inputDefinitions:
+      artifacts:
+        input_data:
+          artifactType:
+            schemaTitle: system.Dataset
+            schemaVersion: 0.0.1
+      parameters:
+        missing_threshold:
+          defaultValue: 0.5
+          isOptional: true
+          parameterType: NUMBER_DOUBLE
+    outputDefinitions:
+      artifacts:
+        output_data:
+          artifactType:
+            schemaTitle: system.Dataset
+            schemaVersion: 0.0.1
+  comp-train:
+    executorLabel: exec-train
+    inputDefinitions:
+      artifacts:
+        input_train:
+          artifactType:
+            schemaTitle: system.Dataset
+            schemaVersion: 0.0.1
+      parameters:
+        cost_sensitive:
+          defaultValue: true
+          isOptional: true
+          parameterType: BOOLEAN
+        imbalance_strategy:
+          defaultValue: smote
+          isOptional: true
+          parameterType: STRING
+        run_id:
+          parameterType: STRING
+        s3_bucket:
+          parameterType: STRING
+    outputDefinitions:
+      artifacts:
+        output_model_hybrid:
+          artifactType:
+            schemaTitle: system.Model
+            schemaVersion: 0.0.1
+        output_model_lgbm:
+          artifactType:
+            schemaTitle: system.Model
+            schemaVersion: 0.0.1
+        output_model_xgb:
+          artifactType:
+            schemaTitle: system.Model
+            schemaVersion: 0.0.1
+  comp-validate:
+    executorLabel: exec-validate
+    inputDefinitions:
+      artifacts:
+        input_data:
+          artifactType:
+            schemaTitle: system.Dataset
+            schemaVersion: 0.0.1
+    outputDefinitions:
+      artifacts:
+        metrics:
+          artifactType:
+            schemaTitle: system.Metrics
+            schemaVersion: 0.0.1
+        output_data:
+          artifactType:
+            schemaTitle: system.Dataset
+            schemaVersion: 0.0.1
+deploymentSpec:
+  executors:
+    exec-evaluate:
+      container:
+        args:
+        - --executor_input
+        - '{{$}}'
+        - --function_to_execute
+        - evaluate
+        command:
+        - sh
+        - -c
+        - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
+          \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
+          \ python3 -m pip install --quiet --no-warn-script-location 'pandas' 'numpy'\
+          \ 'scikit-learn' 'xgboost' 'lightgbm' 'joblib' 'shap' 'matplotlib' 'boto3'\
+          \ 'requests'  &&  python3 -m pip install --quiet --no-warn-script-location\
+          \ 'kfp==2.15.0' '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"\
+          3.9\"' && \"$0\" \"$@\"\n"
+        - sh
+        - -ec
+        - 'program_path=$(mktemp -d)
+
+
+          printf "%s" "$0" > "$program_path/ephemeral_component.py"
+
+          _KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+
+          '
+        - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
+          \ *\n\ndef evaluate(\n    input_test: Input[Dataset],\n    model_xgb: Input[Model],\n\
+          \    model_lgbm: Input[Model],\n    model_hybrid: Input[Model],\n    metrics:\
+          \ Output[Metrics],\n    s3_bucket: str,\n    run_id: str,\n    inference_api_url:\
+          \ str = \"http://localhost:8000\",\n    recall_threshold: float = 0.75,\n\
+          ):\n    import joblib\n    import boto3\n    import requests\n    import\
+          \ pandas as pd\n    import shap\n    import matplotlib.pyplot as plt\n \
+          \   from sklearn.metrics import (\n        roc_auc_score,\n        precision_recall_fscore_support,\n\
+          \        confusion_matrix,\n    )\n\n    df = pd.read_csv(input_test.path)\n\
+          \    X_test = df.drop(columns=[\"isFraud\"])\n    y_test = df[\"isFraud\"\
+          ]\n\n    models = {\n        \"XGBoost\": joblib.load(model_xgb.path),\n\
+          \        \"LightGBM\": joblib.load(model_lgbm.path),\n        \"Hybrid\"\
+          : joblib.load(model_hybrid.path),\n    }\n\n    best_model = None\n    best_recall\
+          \ = 0.0\n    best_f, best_auc = 0.0, 0.0\n\n    for name, model in models.items():\n\
+          \        y_pred = model.predict(X_test)\n        y_prob = (\n          \
+          \  model.predict_proba(X_test)[:, 1]\n            if hasattr(model, \"predict_proba\"\
+          )\n            else y_pred\n        )\n\n        p, r, f, _ = precision_recall_fscore_support(\n\
+          \            y_test, y_pred, average=\"binary\"\n        )\n        auc\
+          \ = roc_auc_score(y_test, y_prob)\n        cm = confusion_matrix(y_test,\
+          \ y_pred).tolist()\n\n        print(f\"\\n{'='*40}\")\n        print(f\"\
+          Model: {name}\")\n        print(f\"  Precision : {p:.4f}\")\n        print(f\"\
+          \  Recall    : {r:.4f}\")\n        print(f\"  F1        : {f:.4f}\")\n \
+          \       print(f\"  AUC-ROC   : {auc:.4f}\")\n        print(f\"  Confusion\
+          \ Matrix: {cm}\")\n\n        if r > best_recall:\n            best_recall\
+          \ = r\n            best_model = name\n            best_f, best_auc = f,\
+          \ auc\n\n    best_model_obj = models[best_model]\n    y_pred_best = best_model_obj.predict(X_test)\n\
+          \    tn = int(((y_pred_best == 0) & (y_test == 0)).sum())\n    fp = int(((y_pred_best\
+          \ == 1) & (y_test == 0)).sum())\n    fpr = round(fp / (fp + tn), 4) if (fp\
+          \ + tn) > 0 else 0.0\n\n    metrics.log_metric(\"best_model\", best_model)\n\
+          \    metrics.log_metric(\"best_recall\", best_recall)\n    metrics.log_metric(\"\
+          best_f1\", best_f)\n    metrics.log_metric(\"best_auc_roc\", best_auc)\n\
+          \    metrics.log_metric(\"false_positive_rate\", fpr)\n\n    print(f\"\\\
+          nBest model by recall: {best_model} ({best_recall:.4f})\")\n    print(f\"\
+          False positive rate: {fpr:.4f}\")\n\n    # SHAP on XGBoost\n    print(\"\
+          \\nRunning SHAP analysis on XGBoost...\")\n    xgb_model = models[\"XGBoost\"\
+          ]\n    explainer = shap.TreeExplainer(xgb_model)\n    sample = X_test.sample(min(500,\
+          \ len(X_test)), random_state=42)\n    shap_values = explainer.shap_values(sample)\n\
+          \n    shap_path = \"/tmp/shap_summary.png\"\n    plt.figure()\n    shap.summary_plot(shap_values,\
+          \ sample, show=False, max_display=20)\n    plt.tight_layout()\n    plt.savefig(shap_path,\
+          \ dpi=100)\n    print(\"SHAP summary saved locally.\")\n\n    s3 = boto3.client(\"\
+          s3\")\n    s3.upload_file(shap_path, s3_bucket, f\"artifacts/shap/shap_summary_{run_id}.png\"\
+          )\n    print(f\"SHAP plot uploaded to s3://{s3_bucket}/artifacts/shap/shap_summary_{run_id}.png\"\
+          )\n\n    drift_scores = {}\n    baseline_mean = 100.0\n    if \"TransactionAmt\"\
+          \ in X_test.columns:\n        current_mean = float(X_test[\"TransactionAmt\"\
+          ].mean())\n        drift_scores[\"TransactionAmt\"] = round(abs(current_mean\
+          \ - baseline_mean) / baseline_mean, 4)\n    if \"card1\" in X_test.columns:\n\
+          \        drift_scores[\"card1\"] = round(float(X_test[\"card1\"].std())\
+          \ / 10000, 4)\n    if \"addr1\" in X_test.columns:\n        drift_scores[\"\
+          addr1\"] = round(float(X_test[\"addr1\"].std()) / 500, 4)\n\n    missing_rate\
+          \ = round(float(df.isnull().mean().mean()), 4)\n\n    payload = {\n    \
+          \    \"recall\": round(best_recall, 6),\n        \"auc_roc\": round(best_auc,\
+          \ 6),\n        \"f1\": round(best_f, 6),\n        \"false_positive_rate\"\
+          : fpr,\n        \"feature_drift\": drift_scores,\n        \"missing_value_rate\"\
+          : missing_rate,\n    }\n\n    try:\n        resp = requests.post(f\"{inference_api_url}/update-metrics\"\
+          , json=payload, timeout=10)\n        print(f\"Metrics pushed to inference\
+          \ API: {resp.status_code}\")\n        print(f\"Payload: {payload}\")\n \
+          \   except Exception as e:\n        print(f\"Warning: Failed to push metrics\
+          \ to inference API: {e}\")\n\n    decision = \"true\" if best_recall >=\
+          \ recall_threshold else \"false\"\n    print(f\"\\nDeploy decision: {decision}\
+          \ (threshold={recall_threshold})\")\n\n    if decision == \"true\":\n  \
+          \      print(\"Deploy decision: PASS - Model meets recall threshold.\")\n\
+          \        print(\"Model registered successfully.\")\n    else:\n        print(\"\
+          Deploy decision: FAIL - Recall below threshold.\")\n        print(\"Pipeline\
+          \ flagged for review.\")\n\n"
+        image: python:3.11.9
+        resources:
+          memoryLimit: 8.0
+          resourceMemoryLimit: 8G
+    exec-feature-engineering-drift:
+      container:
+        args:
+        - --executor_input
+        - '{{$}}'
+        - --function_to_execute
+        - feature_engineering_drift
+        command:
+        - sh
+        - -c
+        - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
+          \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
+          \ python3 -m pip install --quiet --no-warn-script-location 'pandas' 'numpy'\
+          \ 'scikit-learn'  &&  python3 -m pip install --quiet --no-warn-script-location\
+          \ 'kfp==2.15.0' '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"\
+          3.9\"' && \"$0\" \"$@\"\n"
+        - sh
+        - -ec
+        - 'program_path=$(mktemp -d)
+
+
+          printf "%s" "$0" > "$program_path/ephemeral_component.py"
+
+          _KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+
+          '
+        - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
+          \ *\n\ndef feature_engineering_drift(\n    input_data: Input[Dataset],\n\
+          \    output_train: Output[Dataset],\n    output_test: Output[Dataset],\n\
+          \    train_frac: float = 0.7,\n):\n    \"\"\"\n    Temporal split: train\
+          \ on earliest train_frac of transactions,\n    test on the remaining later\
+          \ transactions. This simulates real\n    time-based drift where the model\
+          \ sees a shifted distribution at inference.\n    \"\"\"\n    import numpy\
+          \ as np\n    import pandas as pd\n\n    df = pd.read_csv(input_data.path)\n\
+          \n    if \"TransactionAmt\" in df.columns:\n        df[\"TransactionAmt_log\"\
+          ] = np.log1p(df[\"TransactionAmt\"])\n        df[\"TransactionAmt_cent\"\
+          ] = df[\"TransactionAmt\"] % 1\n\n    df.drop(columns=[\"TransactionID\"\
+          ], inplace=True, errors=\"ignore\")\n\n    # Sort by TransactionDT if available\
+          \ for true temporal split\n    if \"TransactionDT\" in df.columns:\n   \
+          \     df = df.sort_values(\"TransactionDT\").reset_index(drop=True)\n  \
+          \      print(\"Sorted by TransactionDT for temporal split.\")\n    else:\n\
+          \        print(\"TransactionDT not found. Using row order as proxy for time.\"\
+          )\n\n    split_idx = int(len(df) * train_frac)\n    train_df = df.iloc[:split_idx].copy()\n\
+          \    test_df = df.iloc[split_idx:].copy()\n\n    print(f\"Temporal split\
+          \ at {train_frac*100:.0f}%/{(1-train_frac)*100:.0f}%\")\n    print(f\"Train\
+          \ shape : {train_df.shape} | Fraud rate: {train_df['isFraud'].mean()*100:.2f}%\"\
+          )\n    print(f\"Test shape  : {test_df.shape}  | Fraud rate: {test_df['isFraud'].mean()*100:.2f}%\"\
+          )\n\n    # Introduce drift in test set: scale TransactionAmt to simulate\n\
+          \    # higher-value fraud patterns emerging in later time period\n    if\
+          \ \"TransactionAmt\" in test_df.columns:\n        fraud_mask = test_df[\"\
+          isFraud\"] == 1\n        test_df.loc[fraud_mask, \"TransactionAmt\"] = (\n\
+          \            test_df.loc[fraud_mask, \"TransactionAmt\"] * 2.5\n       \
+          \ )\n        test_df.loc[fraud_mask, \"TransactionAmt_log\"] = np.log1p(\n\
+          \            test_df.loc[fraud_mask, \"TransactionAmt\"]\n        )\n  \
+          \      fraud_injected = int(fraud_mask.sum())\n        print(f\"Drift injected:\
+          \ {fraud_injected} fraud transactions have 2.5x TransactionAmt\")\n\n  \
+          \  train_df.to_csv(output_train.path, index=False)\n    test_df.to_csv(output_test.path,\
+          \ index=False)\n\n"
+        image: python:3.11.9-slim
+    exec-ingest:
+      container:
+        args:
+        - --executor_input
+        - '{{$}}'
+        - --function_to_execute
+        - ingest
+        command:
+        - sh
+        - -c
+        - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
+          \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
+          \ python3 -m pip install --quiet --no-warn-script-location 'pandas' 'numpy'\
+          \ 'boto3'  &&  python3 -m pip install --quiet --no-warn-script-location\
+          \ 'kfp==2.15.0' '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"\
+          3.9\"' && \"$0\" \"$@\"\n"
+        - sh
+        - -ec
+        - 'program_path=$(mktemp -d)
+
+
+          printf "%s" "$0" > "$program_path/ephemeral_component.py"
+
+          _KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+
+          '
+        - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
+          \ *\n\ndef ingest(\n    s3_bucket: str,\n    s3_transaction_key: str,\n\
+          \    s3_identity_key: str,\n    output_data: Output[Dataset],\n):\n    import\
+          \ boto3\n    import pandas as pd\n    from io import BytesIO\n\n    s3 =\
+          \ boto3.client(\"s3\")\n\n    print(\"Downloading transaction data from\
+          \ S3...\")\n    trans_obj = s3.get_object(Bucket=s3_bucket, Key=s3_transaction_key)\n\
+          \    trans = pd.read_csv(BytesIO(trans_obj[\"Body\"].read()))\n\n    print(\"\
+          Downloading identity data from S3...\")\n    identity_obj = s3.get_object(Bucket=s3_bucket,\
+          \ Key=s3_identity_key)\n    identity = pd.read_csv(BytesIO(identity_obj[\"\
+          Body\"].read()))\n\n    print(\"Merging on TransactionID...\")\n    df =\
+          \ trans.merge(identity, on=\"TransactionID\", how=\"left\")\n\n    print(f\"\
+          Merged shape: {df.shape}\")\n    df.to_csv(output_data.path, index=False)\n\
+          \    print(\"Ingestion complete.\")\n\n"
+        image: python:3.11.9-slim
+    exec-preprocess:
+      container:
+        args:
+        - --executor_input
+        - '{{$}}'
+        - --function_to_execute
+        - preprocess
+        command:
+        - sh
+        - -c
+        - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
+          \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
+          \ python3 -m pip install --quiet --no-warn-script-location 'pandas' 'numpy'\
+          \ 'scikit-learn'  &&  python3 -m pip install --quiet --no-warn-script-location\
+          \ 'kfp==2.15.0' '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"\
+          3.9\"' && \"$0\" \"$@\"\n"
+        - sh
+        - -ec
+        - 'program_path=$(mktemp -d)
+
+
+          printf "%s" "$0" > "$program_path/ephemeral_component.py"
+
+          _KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+
+          '
+        - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
+          \ *\n\ndef preprocess(\n    input_data: Input[Dataset],\n    output_data:\
+          \ Output[Dataset],\n    missing_threshold: float = 0.5,\n):\n    import\
+          \ numpy as np\n    import pandas as pd\n    from sklearn.preprocessing import\
+          \ LabelEncoder\n\n    df = pd.read_csv(input_data.path)\n\n    before =\
+          \ df.shape[1]\n    df = df.loc[:, df.isnull().mean() < missing_threshold]\n\
+          \    print(f\"Dropped {before - df.shape[1]} high-missing columns\")\n\n\
+          \    cat_cols = df.select_dtypes(include=\"object\").columns.tolist()\n\
+          \    num_cols = df.select_dtypes(include=[np.number]).columns.tolist()\n\
+          \    num_cols = [c for c in num_cols if c not in [\"TransactionID\", \"\
+          isFraud\"]]\n\n    df[num_cols] = df[num_cols].fillna(df[num_cols].median())\n\
+          \    for col in cat_cols:\n        df[col] = df[col].fillna(df[col].mode()[0])\n\
+          \n    le = LabelEncoder()\n    for col in cat_cols:\n        if df[col].nunique()\
+          \ > 50:\n            freq = df[col].value_counts(normalize=True)\n     \
+          \       df[col] = df[col].map(freq)\n        else:\n            df[col]\
+          \ = le.fit_transform(df[col].astype(str))\n\n    df.to_csv(output_data.path,\
+          \ index=False)\n    print(f\"Preprocessing complete. Final shape: {df.shape}\"\
+          )\n\n"
+        image: python:3.11.9-slim
+    exec-train:
+      container:
+        args:
+        - --executor_input
+        - '{{$}}'
+        - --function_to_execute
+        - train
+        command:
+        - sh
+        - -c
+        - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
+          \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
+          \ python3 -m pip install --quiet --no-warn-script-location 'pandas' 'numpy'\
+          \ 'scikit-learn' 'xgboost' 'lightgbm' 'imbalanced-learn' 'joblib' 'boto3'\
+          \  &&  python3 -m pip install --quiet --no-warn-script-location 'kfp==2.15.0'\
+          \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"' && \"\
+          $0\" \"$@\"\n"
+        - sh
+        - -ec
+        - 'program_path=$(mktemp -d)
+
+
+          printf "%s" "$0" > "$program_path/ephemeral_component.py"
+
+          _KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+
+          '
+        - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
+          \ *\n\ndef train(\n    input_train: Input[Dataset],\n    output_model_xgb:\
+          \ Output[Model],\n    output_model_lgbm: Output[Model],\n    output_model_hybrid:\
+          \ Output[Model],\n    s3_bucket: str,\n    run_id: str,\n    imbalance_strategy:\
+          \ str = \"smote\",\n    cost_sensitive: bool = True,\n):\n    import boto3\n\
+          \    import joblib\n    import pandas as pd\n    from imblearn.over_sampling\
+          \ import SMOTE\n    from sklearn.ensemble import RandomForestClassifier,\
+          \ VotingClassifier\n    from sklearn.linear_model import LogisticRegression\n\
+          \    from xgboost import XGBClassifier\n    from lightgbm import LGBMClassifier\n\
+          \n    df = pd.read_csv(input_train.path)\n    X = df.drop(columns=[\"isFraud\"\
+          ])\n    y = df[\"isFraud\"]\n\n    fraud_weight = int((y == 0).sum() / (y\
+          \ == 1).sum())\n    print(f\"Class ratio (neg/pos): {fraud_weight}\")\n\n\
+          \    if imbalance_strategy == \"smote\":\n        print(\"Applying SMOTE...\"\
+          )\n        sm = SMOTE(random_state=42)\n        X, y = sm.fit_resample(X,\
+          \ y)\n    else:\n        print(\"Using class_weight strategy...\")\n\n \
+          \   fn_weight = fraud_weight if cost_sensitive else 1\n\n    s3 = boto3.client(\"\
+          s3\")\n\n    print(\"Training XGBoost...\")\n    xgb = XGBClassifier(\n\
+          \        device=\"cpu\",\n        scale_pos_weight=fn_weight,\n        n_estimators=300,\n\
+          \        max_depth=6,\n        learning_rate=0.05,\n        subsample=0.8,\n\
+          \        colsample_bytree=0.8,\n        eval_metric=\"aucpr\",\n       \
+          \ random_state=42,\n        n_jobs=-1,\n    )\n    xgb.fit(X, y)\n    joblib.dump(xgb,\
+          \ output_model_xgb.path)\n    s3.upload_file(output_model_xgb.path, s3_bucket,\
+          \ f\"models/{run_id}/xgb.joblib\")\n    print(\"XGBoost saved and uploaded\
+          \ to S3.\")\n\n    print(\"Training LightGBM...\")\n    lgbm = LGBMClassifier(\n\
+          \        device_type=\"cpu\",\n        scale_pos_weight=fn_weight,\n   \
+          \     n_estimators=300,\n        learning_rate=0.05,\n        num_leaves=63,\n\
+          \        subsample=0.8,\n        colsample_bytree=0.8,\n        random_state=42,\n\
+          \        n_jobs=-1,\n    )\n    lgbm.fit(X, y)\n    joblib.dump(lgbm, output_model_lgbm.path)\n\
+          \    s3.upload_file(output_model_lgbm.path, s3_bucket, f\"models/{run_id}/lgbm.joblib\"\
+          )\n    print(\"LightGBM saved and uploaded to S3.\")\n\n    print(\"Training\
+          \ Hybrid (RF + LR Voting)...\")\n    rf = RandomForestClassifier(\n    \
+          \    n_estimators=200,\n        class_weight={0: 1, 1: fn_weight},\n   \
+          \     random_state=42,\n        n_jobs=-1,\n    )\n    lr = LogisticRegression(\n\
+          \        class_weight={0: 1, 1: fn_weight},\n        max_iter=1000,\n  \
+          \      random_state=42,\n    )\n    hybrid = VotingClassifier(\n       \
+          \ estimators=[(\"rf\", rf), (\"lr\", lr)], voting=\"soft\"\n    )\n    hybrid.fit(X,\
+          \ y)\n    joblib.dump(hybrid, output_model_hybrid.path)\n    s3.upload_file(output_model_hybrid.path,\
+          \ s3_bucket, f\"models/{run_id}/hybrid.joblib\")\n    print(\"Hybrid model\
+          \ saved and uploaded to S3.\")\n\n"
+        image: python:3.11.9
+        resources:
+          cpuLimit: 6.0
+          memoryLimit: 16.0
+          resourceCpuLimit: '6'
+          resourceMemoryLimit: 16G
+    exec-validate:
+      container:
+        args:
+        - --executor_input
+        - '{{$}}'
+        - --function_to_execute
+        - validate
+        command:
+        - sh
+        - -c
+        - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
+          \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
+          \ python3 -m pip install --quiet --no-warn-script-location 'pandas' 'numpy'\
+          \  &&  python3 -m pip install --quiet --no-warn-script-location 'kfp==2.15.0'\
+          \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"' && \"\
+          $0\" \"$@\"\n"
+        - sh
+        - -ec
+        - 'program_path=$(mktemp -d)
+
+
+          printf "%s" "$0" > "$program_path/ephemeral_component.py"
+
+          _KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+
+          '
+        - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
+          \ *\n\ndef validate(\n    input_data: Input[Dataset],\n    output_data:\
+          \ Output[Dataset],\n    metrics: Output[Metrics],\n):\n    import pandas\
+          \ as pd\n\n    df = pd.read_csv(input_data.path)\n\n    assert \"isFraud\"\
+          \ in df.columns, \"Target column 'isFraud' missing\"\n    assert \"TransactionID\"\
+          \ in df.columns, \"TransactionID column missing\"\n    assert df.shape[0]\
+          \ > 0, \"Dataset is empty\"\n\n    total = len(df)\n    fraud = int(df[\"\
+          isFraud\"].sum())\n    fraud_rate = round(fraud / total * 100, 2)\n    missing_pct\
+          \ = round(df.isnull().mean().mean() * 100, 2)\n\n    print(f\"Total records\
+          \   : {total}\")\n    print(f\"Fraud cases     : {fraud} ({fraud_rate}%)\"\
+          )\n    print(f\"Avg missing %   : {missing_pct}%\")\n\n    metrics.log_metric(\"\
+          total_records\", total)\n    metrics.log_metric(\"fraud_cases\", fraud)\n\
+          \    metrics.log_metric(\"fraud_rate_pct\", fraud_rate)\n    metrics.log_metric(\"\
+          avg_missing_pct\", missing_pct)\n\n    df.to_csv(output_data.path, index=False)\n\
+          \    print(\"Validation passed.\")\n\n"
+        image: python:3.11.9-slim
+pipelineInfo:
+  description: Fraud detection pipeline with temporal split and drift simulation
+  name: fraudex-pipeline-v2-drift-simulation
+root:
+  dag:
+    tasks:
+      evaluate:
+        cachingOptions:
+          enableCache: true
+        componentRef:
+          name: comp-evaluate
+        dependentTasks:
+        - feature-engineering-drift
+        - train
+        inputs:
+          artifacts:
+            input_test:
+              taskOutputArtifact:
+                outputArtifactKey: output_test
+                producerTask: feature-engineering-drift
+            model_hybrid:
+              taskOutputArtifact:
+                outputArtifactKey: output_model_hybrid
+                producerTask: train
+            model_lgbm:
+              taskOutputArtifact:
+                outputArtifactKey: output_model_lgbm
+                producerTask: train
+            model_xgb:
+              taskOutputArtifact:
+                outputArtifactKey: output_model_xgb
+                producerTask: train
+          parameters:
+            inference_api_url:
+              componentInputParameter: inference_api_url
+            recall_threshold:
+              componentInputParameter: recall_threshold
+            run_id:
+              componentInputParameter: run_id
+            s3_bucket:
+              componentInputParameter: s3_bucket
+        taskInfo:
+          name: evaluate
+      feature-engineering-drift:
+        cachingOptions:
+          enableCache: true
+        componentRef:
+          name: comp-feature-engineering-drift
+        dependentTasks:
+        - preprocess
+        inputs:
+          artifacts:
+            input_data:
+              taskOutputArtifact:
+                outputArtifactKey: output_data
+                producerTask: preprocess
+          parameters:
+            train_frac:
+              componentInputParameter: train_frac
+        taskInfo:
+          name: feature-engineering-drift
+      ingest:
+        cachingOptions:
+          enableCache: true
+        componentRef:
+          name: comp-ingest
+        inputs:
+          parameters:
+            s3_bucket:
+              componentInputParameter: s3_bucket
+            s3_identity_key:
+              componentInputParameter: s3_identity_key
+            s3_transaction_key:
+              componentInputParameter: s3_transaction_key
+        retryPolicy:
+          backoffDuration: 0s
+          backoffFactor: 2.0
+          backoffMaxDuration: 3600s
+          maxRetryCount: 2
+        taskInfo:
+          name: ingest
+      preprocess:
+        cachingOptions:
+          enableCache: true
+        componentRef:
+          name: comp-preprocess
+        dependentTasks:
+        - validate
+        inputs:
+          artifacts:
+            input_data:
+              taskOutputArtifact:
+                outputArtifactKey: output_data
+                producerTask: validate
+          parameters:
+            missing_threshold:
+              componentInputParameter: missing_threshold
+        taskInfo:
+          name: preprocess
+      train:
+        cachingOptions:
+          enableCache: true
+        componentRef:
+          name: comp-train
+        dependentTasks:
+        - feature-engineering-drift
+        inputs:
+          artifacts:
+            input_train:
+              taskOutputArtifact:
+                outputArtifactKey: output_train
+                producerTask: feature-engineering-drift
+          parameters:
+            cost_sensitive:
+              componentInputParameter: cost_sensitive
+            imbalance_strategy:
+              componentInputParameter: imbalance_strategy
+            run_id:
+              componentInputParameter: run_id
+            s3_bucket:
+              componentInputParameter: s3_bucket
+        taskInfo:
+          name: train
+      validate:
+        cachingOptions:
+          enableCache: true
+        componentRef:
+          name: comp-validate
+        dependentTasks:
+        - ingest
+        inputs:
+          artifacts:
+            input_data:
+              taskOutputArtifact:
+                outputArtifactKey: output_data
+                producerTask: ingest
+        retryPolicy:
+          backoffDuration: 0s
+          backoffFactor: 2.0
+          backoffMaxDuration: 3600s
+          maxRetryCount: 1
+        taskInfo:
+          name: validate
+  inputDefinitions:
+    parameters:
+      cost_sensitive:
+        defaultValue: true
+        isOptional: true
+        parameterType: BOOLEAN
+      imbalance_strategy:
+        defaultValue: smote
+        isOptional: true
+        parameterType: STRING
+      inference_api_url:
+        defaultValue: http://localhost:8000
+        isOptional: true
+        parameterType: STRING
+      missing_threshold:
+        defaultValue: 0.5
+        isOptional: true
+        parameterType: NUMBER_DOUBLE
+      recall_threshold:
+        defaultValue: 0.75
+        isOptional: true
+        parameterType: NUMBER_DOUBLE
+      run_id:
+        defaultValue: drift-run-1
+        isOptional: true
+        parameterType: STRING
+      s3_bucket:
+        defaultValue: fraudex-k8
+        isOptional: true
+        parameterType: STRING
+      s3_identity_key:
+        defaultValue: data/train_identity.csv
+        isOptional: true
+        parameterType: STRING
+      s3_transaction_key:
+        defaultValue: data/train_transaction.csv
+        isOptional: true
+        parameterType: STRING
+      train_frac:
+        defaultValue: 0.7
+        isOptional: true
+        parameterType: NUMBER_DOUBLE
+schemaVersion: 2.1.0
+sdkVersion: kfp-2.15.0

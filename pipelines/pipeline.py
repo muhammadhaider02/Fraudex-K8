@@ -118,21 +118,25 @@ def preprocess(
 
 
 # ─────────────────────────────────────────────
-# COMPONENT 4: Feature Engineering
+# COMPONENT 4: Feature Engineering with Temporal Split (DRIFT)
 # ─────────────────────────────────────────────
 @dsl.component(
     base_image="python:3.11.9-slim",
     packages_to_install=["pandas", "numpy", "scikit-learn"],
 )
-def feature_engineering(
+def feature_engineering_drift(
     input_data: Input[Dataset],
     output_train: Output[Dataset],
     output_test: Output[Dataset],
-    test_size: float = 0.2,
+    train_frac: float = 0.7,
 ):
+    """
+    Temporal split: train on earliest train_frac of transactions,
+    test on the remaining later transactions. This simulates real
+    time-based drift where the model sees a shifted distribution at inference.
+    """
     import numpy as np
     import pandas as pd
-    from sklearn.model_selection import train_test_split
 
     df = pd.read_csv(input_data.path)
 
@@ -142,23 +146,36 @@ def feature_engineering(
 
     df.drop(columns=["TransactionID"], inplace=True, errors="ignore")
 
-    X = df.drop(columns=["isFraud"])
-    y = df["isFraud"]
+    # Sort by TransactionDT if available for true temporal split
+    if "TransactionDT" in df.columns:
+        df = df.sort_values("TransactionDT").reset_index(drop=True)
+        print("Sorted by TransactionDT for temporal split.")
+    else:
+        print("TransactionDT not found. Using row order as proxy for time.")
 
-    X_train, X_test, y_train, y_test = train_test_split(
-        X, y, test_size=test_size, stratify=y, random_state=42
-    )
+    split_idx = int(len(df) * train_frac)
+    train_df = df.iloc[:split_idx].copy()
+    test_df = df.iloc[split_idx:].copy()
 
-    train_df = X_train.copy()
-    train_df["isFraud"] = y_train.values
-    test_df = X_test.copy()
-    test_df["isFraud"] = y_test.values
+    print(f"Temporal split at {train_frac*100:.0f}%/{(1-train_frac)*100:.0f}%")
+    print(f"Train shape : {train_df.shape} | Fraud rate: {train_df['isFraud'].mean()*100:.2f}%")
+    print(f"Test shape  : {test_df.shape}  | Fraud rate: {test_df['isFraud'].mean()*100:.2f}%")
+
+    # Introduce drift in test set: scale TransactionAmt to simulate
+    # higher-value fraud patterns emerging in later time period
+    if "TransactionAmt" in test_df.columns:
+        fraud_mask = test_df["isFraud"] == 1
+        test_df.loc[fraud_mask, "TransactionAmt"] = (
+            test_df.loc[fraud_mask, "TransactionAmt"] * 2.5
+        )
+        test_df.loc[fraud_mask, "TransactionAmt_log"] = np.log1p(
+            test_df.loc[fraud_mask, "TransactionAmt"]
+        )
+        fraud_injected = int(fraud_mask.sum())
+        print(f"Drift injected: {fraud_injected} fraud transactions have 2.5x TransactionAmt")
 
     train_df.to_csv(output_train.path, index=False)
     test_df.to_csv(output_test.path, index=False)
-
-    print(f"Train shape: {train_df.shape}")
-    print(f"Test shape : {test_df.shape}")
 
 
 # ─────────────────────────────────────────────
@@ -352,7 +369,6 @@ def evaluate(
             best_model = name
             best_f, best_auc = f, auc
 
-    # Compute false positive rate from best model
     best_model_obj = models[best_model]
     y_pred_best = best_model_obj.predict(X_test)
     tn = int(((y_pred_best == 0) & (y_test == 0)).sum())
@@ -386,7 +402,6 @@ def evaluate(
     s3.upload_file(shap_path, s3_bucket, f"artifacts/shap/shap_summary_{run_id}.png")
     print(f"SHAP plot uploaded to s3://{s3_bucket}/artifacts/shap/shap_summary_{run_id}.png")
 
-    # Compute feature drift scores vs baseline TransactionAmt mean
     drift_scores = {}
     baseline_mean = 100.0
     if "TransactionAmt" in X_test.columns:
@@ -399,7 +414,6 @@ def evaluate(
 
     missing_rate = round(float(df.isnull().mean().mean()), 4)
 
-    # Push metrics to inference API
     payload = {
         "recall": round(best_recall, 6),
         "auc_roc": round(best_auc, 6),
@@ -415,7 +429,6 @@ def evaluate(
         print(f"Payload: {payload}")
     except Exception as e:
         print(f"Warning: Failed to push metrics to inference API: {e}")
-        print("Metrics will not be updated in Prometheus/Grafana for this run.")
 
     decision = "true" if best_recall >= recall_threshold else "false"
     print(f"\nDeploy decision: {decision} (threshold={recall_threshold})")
@@ -429,19 +442,19 @@ def evaluate(
 
 
 # ─────────────────────────────────────────────
-# PIPELINE DEFINITION
+# PIPELINE DEFINITION v2 - Drift Simulation
 # ─────────────────────────────────────────────
 @dsl.pipeline(
-    name="Fraudex Pipeline",
-    description="End-to-end fraud detection pipeline on IEEE CIS dataset",
+    name="Fraudex Pipeline v2 - Drift Simulation",
+    description="Fraud detection pipeline with temporal split and drift simulation",
 )
-def fraudex_pipeline(
+def fraudex_pipeline_v2(
     s3_bucket: str = "fraudex-k8",
     s3_transaction_key: str = "data/train_transaction.csv",
     s3_identity_key: str = "data/train_identity.csv",
-    run_id: str = "run-1",
+    run_id: str = "drift-run-1",
     missing_threshold: float = 0.5,
-    test_size: float = 0.2,
+    train_frac: float = 0.7,
     imbalance_strategy: str = "smote",
     cost_sensitive: bool = True,
     recall_threshold: float = 0.75,
@@ -467,13 +480,13 @@ def fraudex_pipeline(
         missing_threshold=missing_threshold,
     )
 
-    # Step 4: Feature Engineering
-    fe_task = feature_engineering(
+    # Step 4: Feature Engineering with temporal drift split
+    fe_task = feature_engineering_drift(
         input_data=preprocess_task.outputs["output_data"],
-        test_size=test_size,
+        train_frac=train_frac,
     )
 
-    # Step 5: Train
+    # Step 5: Train on early data
     train_task = train(
         input_train=fe_task.outputs["output_train"],
         s3_bucket=s3_bucket,
@@ -484,7 +497,7 @@ def fraudex_pipeline(
     train_task.set_memory_limit("16G")
     train_task.set_cpu_limit("6")
 
-    # Step 6: Evaluate
+    # Step 6: Evaluate on drifted later data
     evaluate_task = evaluate(
         input_test=fe_task.outputs["output_test"],
         model_xgb=train_task.outputs["output_model_xgb"],
@@ -505,7 +518,8 @@ if __name__ == "__main__":
     from kfp import compiler
 
     compiler.Compiler().compile(
-        pipeline_func=fraudex_pipeline,
-        package_path="pipelines/v1_fraudex.yaml",
+        pipeline_func=fraudex_pipeline_v2,
+        package_path="pipelines/v2_fraudex.yaml",
     )
-    print("Pipeline compiled to pipelines/v1_fraudex.yaml")
+    print("Pipeline compiled to pipelines/v2_fraudex.yaml")
+    
