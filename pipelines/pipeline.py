@@ -522,4 +522,3 @@ if __name__ == "__main__":
         package_path="pipelines/v2_fraudex.yaml",
     )
     print("Pipeline compiled to pipelines/v2_fraudex.yaml")
-    
