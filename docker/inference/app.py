@@ -44,7 +44,7 @@ PREDICTION_CONFIDENCE = Histogram(
     buckets=[0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
 )
 
-# Model performance gauges (updated via /update-metrics endpoint)
+# Model performance gauges (updated via /update-metrics after each pipeline run)
 FRAUD_RECALL = Gauge("fraudex_fraud_recall", "Fraud recall score")
 AUC_ROC = Gauge("fraudex_auc_roc", "AUC-ROC score")
 F1_SCORE = Gauge("fraudex_f1_score", "F1 score")
@@ -58,16 +58,6 @@ FEATURE_DRIFT = Gauge(
 )
 MISSING_VALUE_RATE = Gauge("fraudex_missing_value_rate", "Missing value rate in input data")
 INPUT_ANOMALIES = Counter("fraudex_input_anomalies_total", "Total input anomalies detected")
-
-# Seed with run-1 results so dashboards show data immediately
-FRAUD_RECALL.set(0.86886)
-AUC_ROC.set(0.917873)
-F1_SCORE.set(0.238779)
-FALSE_POSITIVE_RATE.set(0.12)
-FEATURE_DRIFT.labels(feature="TransactionAmt").set(0.02)
-FEATURE_DRIFT.labels(feature="card1").set(0.01)
-FEATURE_DRIFT.labels(feature="addr1").set(0.03)
-MISSING_VALUE_RATE.set(0.26)
 
 
 def load_model():

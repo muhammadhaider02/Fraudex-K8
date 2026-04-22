@@ -118,7 +118,51 @@ def preprocess(
 
 
 # ─────────────────────────────────────────────
-# COMPONENT 4: Feature Engineering with Temporal Split (DRIFT)
+# COMPONENT 4a: Feature Engineering (standard split)
+# ─────────────────────────────────────────────
+@dsl.component(
+    base_image="python:3.11.9-slim",
+    packages_to_install=["pandas", "numpy", "scikit-learn"],
+)
+def feature_engineering(
+    input_data: Input[Dataset],
+    output_train: Output[Dataset],
+    output_test: Output[Dataset],
+    test_size: float = 0.2,
+):
+    import numpy as np
+    import pandas as pd
+    from sklearn.model_selection import train_test_split
+
+    df = pd.read_csv(input_data.path)
+
+    if "TransactionAmt" in df.columns:
+        df["TransactionAmt_log"] = np.log1p(df["TransactionAmt"])
+        df["TransactionAmt_cent"] = df["TransactionAmt"] % 1
+
+    df.drop(columns=["TransactionID"], inplace=True, errors="ignore")
+
+    X = df.drop(columns=["isFraud"])
+    y = df["isFraud"]
+
+    X_train, X_test, y_train, y_test = train_test_split(
+        X, y, test_size=test_size, stratify=y, random_state=42
+    )
+
+    train_df = X_train.copy()
+    train_df["isFraud"] = y_train.values
+    test_df = X_test.copy()
+    test_df["isFraud"] = y_test.values
+
+    train_df.to_csv(output_train.path, index=False)
+    test_df.to_csv(output_test.path, index=False)
+
+    print(f"Train shape: {train_df.shape}")
+    print(f"Test shape : {test_df.shape}")
+
+
+# ─────────────────────────────────────────────
+# COMPONENT 4b: Feature Engineering with Temporal Split (DRIFT)
 # ─────────────────────────────────────────────
 @dsl.component(
     base_image="python:3.11.9-slim",
@@ -130,11 +174,6 @@ def feature_engineering_drift(
     output_test: Output[Dataset],
     train_frac: float = 0.7,
 ):
-    """
-    Temporal split: train on earliest train_frac of transactions,
-    test on the remaining later transactions. This simulates real
-    time-based drift where the model sees a shifted distribution at inference.
-    """
     import numpy as np
     import pandas as pd
 
@@ -146,7 +185,6 @@ def feature_engineering_drift(
 
     df.drop(columns=["TransactionID"], inplace=True, errors="ignore")
 
-    # Sort by TransactionDT if available for true temporal split
     if "TransactionDT" in df.columns:
         df = df.sort_values("TransactionDT").reset_index(drop=True)
         print("Sorted by TransactionDT for temporal split.")
@@ -161,8 +199,6 @@ def feature_engineering_drift(
     print(f"Train shape : {train_df.shape} | Fraud rate: {train_df['isFraud'].mean()*100:.2f}%")
     print(f"Test shape  : {test_df.shape}  | Fraud rate: {test_df['isFraud'].mean()*100:.2f}%")
 
-    # Introduce drift in test set: scale TransactionAmt to simulate
-    # higher-value fraud patterns emerging in later time period
     if "TransactionAmt" in test_df.columns:
         fraud_mask = test_df["isFraud"] == 1
         test_df.loc[fraud_mask, "TransactionAmt"] = (
@@ -442,22 +478,98 @@ def evaluate(
 
 
 # ─────────────────────────────────────────────
-# PIPELINE DEFINITION v2 - Drift Simulation
+# COMPONENT 7: Retraining Decision
+# Implements hybrid strategy:
+#   - Retrain if recall drops below threshold (performance trigger)
+#   - Retrain if drift score exceeds limit (drift trigger)
+#   - Always retrain after max_runs_since_retrain runs (periodic trigger)
+# ─────────────────────────────────────────────
+@dsl.component(
+    base_image="python:3.11.9-slim",
+    packages_to_install=["requests"],
+)
+def retraining_decision(
+    inference_api_url: str,
+    recall_threshold: float = 0.75,
+    drift_threshold: float = 0.10,
+    max_runs_since_retrain: int = 5,
+    current_run_number: int = 1,
+):
+    import requests
+
+    print("\n" + "="*50)
+    print("RETRAINING STRATEGY: HYBRID")
+    print("="*50)
+    print(f"  Recall threshold        : {recall_threshold}")
+    print(f"  Drift threshold         : {drift_threshold}")
+    print(f"  Periodic interval       : every {max_runs_since_retrain} runs")
+    print(f"  Current run number      : {current_run_number}")
+
+    retrain_reason = None
+
+    try:
+        resp = requests.get(f"{inference_api_url}/metrics", timeout=10)
+        lines = resp.text.split("\n")
+
+        recall = None
+        drift_transactionamt = None
+
+        for line in lines:
+            if line.startswith("fraudex_fraud_recall "):
+                recall = float(line.split(" ")[1])
+            if 'fraudex_feature_drift_score{feature="TransactionAmt"}' in line:
+                drift_transactionamt = float(line.split(" ")[1])
+
+        print(f"\nCurrent metrics from Prometheus:")
+        print(f"  Fraud recall            : {recall}")
+        print(f"  TransactionAmt drift    : {drift_transactionamt}")
+
+        # Trigger 1: Performance drop
+        if recall is not None and recall < recall_threshold:
+            retrain_reason = f"PERFORMANCE_DROP (recall={recall:.4f} < threshold={recall_threshold})"
+
+        # Trigger 2: Data drift
+        if drift_transactionamt is not None and drift_transactionamt > drift_threshold:
+            retrain_reason = retrain_reason or f"DATA_DRIFT (drift={drift_transactionamt:.4f} > threshold={drift_threshold})"
+
+        # Trigger 3: Periodic
+        if current_run_number % max_runs_since_retrain == 0:
+            retrain_reason = retrain_reason or f"PERIODIC (run {current_run_number} % {max_runs_since_retrain} == 0)"
+
+    except Exception as e:
+        print(f"Warning: Could not fetch metrics from inference API: {e}")
+        retrain_reason = "METRICS_UNAVAILABLE - defaulting to retrain"
+
+    if retrain_reason:
+        print(f"\nRETRAIN TRIGGERED: {retrain_reason}")
+        print("Action: CI/CD pipeline will be triggered for full retraining.")
+    else:
+        print("\nNO RETRAIN NEEDED: All metrics within acceptable bounds.")
+        print("Action: Continue monitoring.")
+
+    print("\nRetraining decision complete.")
+
+
+# ─────────────────────────────────────────────
+# PIPELINE DEFINITION v3 - Intelligent Retraining
 # ─────────────────────────────────────────────
 @dsl.pipeline(
-    name="Fraudex Pipeline v2 - Drift Simulation",
-    description="Fraud detection pipeline with temporal split and drift simulation",
+    name="Fraudex Pipeline v3 - Intelligent Retraining",
+    description="Fraud detection pipeline with hybrid threshold+drift+periodic retraining strategy",
 )
-def fraudex_pipeline_v2(
+def fraudex_pipeline_v3(
     s3_bucket: str = "fraudex-k8",
     s3_transaction_key: str = "data/train_transaction.csv",
     s3_identity_key: str = "data/train_identity.csv",
-    run_id: str = "drift-run-1",
+    run_id: str = "retrain-run-1",
     missing_threshold: float = 0.5,
-    train_frac: float = 0.7,
+    test_size: float = 0.2,
     imbalance_strategy: str = "smote",
     cost_sensitive: bool = True,
     recall_threshold: float = 0.75,
+    drift_threshold: float = 0.10,
+    max_runs_since_retrain: int = 5,
+    current_run_number: int = 1,
     inference_api_url: str = "http://localhost:8000",
 ):
     # Step 1: Ingest
@@ -480,13 +592,13 @@ def fraudex_pipeline_v2(
         missing_threshold=missing_threshold,
     )
 
-    # Step 4: Feature Engineering with temporal drift split
-    fe_task = feature_engineering_drift(
+    # Step 4: Feature Engineering (standard split for retraining)
+    fe_task = feature_engineering(
         input_data=preprocess_task.outputs["output_data"],
-        train_frac=train_frac,
+        test_size=test_size,
     )
 
-    # Step 5: Train on early data
+    # Step 5: Train on full dataset
     train_task = train(
         input_train=fe_task.outputs["output_train"],
         s3_bucket=s3_bucket,
@@ -497,7 +609,7 @@ def fraudex_pipeline_v2(
     train_task.set_memory_limit("16G")
     train_task.set_cpu_limit("6")
 
-    # Step 6: Evaluate on drifted later data
+    # Step 6: Evaluate retrained model
     evaluate_task = evaluate(
         input_test=fe_task.outputs["output_test"],
         model_xgb=train_task.outputs["output_model_xgb"],
@@ -510,6 +622,15 @@ def fraudex_pipeline_v2(
     )
     evaluate_task.set_memory_limit("8G")
 
+    # Step 7: Retraining decision for next cycle
+    retraining_decision(
+        inference_api_url=inference_api_url,
+        recall_threshold=recall_threshold,
+        drift_threshold=drift_threshold,
+        max_runs_since_retrain=max_runs_since_retrain,
+        current_run_number=current_run_number,
+    ).after(evaluate_task)
+
 
 # ─────────────────────────────────────────────
 # COMPILE
@@ -518,7 +639,7 @@ if __name__ == "__main__":
     from kfp import compiler
 
     compiler.Compiler().compile(
-        pipeline_func=fraudex_pipeline_v2,
-        package_path="pipelines/v2_fraudex.yaml",
+        pipeline_func=fraudex_pipeline_v3,
+        package_path="pipelines/v3_fraudex.yaml",
     )
-    print("Pipeline compiled to pipelines/v2_fraudex.yaml")
+    print("Pipeline compiled to pipelines/v3_fraudex.yaml")
