@@ -10,5 +10,3 @@ wheels/
 .venv
 
 data/*.csv
-
-MANUAL.md
