@@ -1,5 +1,7 @@
 name: Fraudex CI/CD
 
+run-name: "${{ github.event.inputs.trigger_reason && format('triggered: {0}', github.event.inputs.trigger_reason) || github.event.head_commit.message }}"
+
 on:
   push:
     branches: [main]
@@ -150,10 +152,18 @@ jobs:
             cd ~/Fraudex-K8
             git pull origin main
 
-            # ── Trigger Kubeflow pipeline run ─────────────
+            # ── Select pipeline based on trigger reason ───
             TRIGGER_REASON="${{ github.event.inputs.trigger_reason || 'code_push' }}"
             TIMESTAMP=$(date +%Y%m%d-%H%M%S)
             RUN_ID="cicd-${TIMESTAMP}"
+
+            if [ "$TRIGGER_REASON" == "drift_detected" ] || [ "$TRIGGER_REASON" == "performance_drop" ]; then
+                PIPELINE_YAML="pipelines/v3_fraudex.yaml"
+                echo "Drift/performance trigger detected, running retrain pipeline"
+            else
+                PIPELINE_YAML="pipelines/v2_fraudex.yaml"
+                echo "Standard trigger, running pipeline"
+            fi
 
             echo "Triggering KFP run: ${RUN_ID} (reason: ${TRIGGER_REASON})"
 
@@ -161,7 +171,7 @@ jobs:
             import kfp
             client = kfp.Client(host='http://localhost:8080')
             run = client.create_run_from_pipeline_package(
-                'pipelines/v3_fraudex.yaml',
+                '${PIPELINE_YAML}',
                 arguments={
                     's3_bucket': 'fraudex-k8',
                     's3_transaction_key': 'data/train_transaction.csv',
@@ -186,4 +196,3 @@ jobs:
             sleep 3
             curl -s http://localhost:8000/health
             echo "Inference API deployed successfully"
-            
