@@ -443,8 +443,8 @@ deploymentSpec:
           \ *\n\ndef retraining_decision(\n    inference_api_url: str,\n    recall_threshold:\
           \ float = 0.75,\n    drift_threshold: float = 0.10,\n    max_runs_since_retrain:\
           \ int = 5,\n    current_run_number: int = 1,\n):\n    import requests\n\n\
-          \    print(\"\\n\" + \"=\"*50)\n    print(\"RETRAINING STRATEGY: HYBRID\"\
-          )\n    print(\"=\"*50)\n    print(f\"  Recall threshold        : {recall_threshold}\"\
+          \    print(\"\\n\" + \"=\" * 50)\n    print(\"RETRAINING STRATEGY: HYBRID\"\
+          )\n    print(\"=\" * 50)\n    print(f\"  Recall threshold        : {recall_threshold}\"\
           )\n    print(f\"  Drift threshold         : {drift_threshold}\")\n    print(f\"\
           \  Periodic interval       : every {max_runs_since_retrain} runs\")\n  \
           \  print(f\"  Current run number      : {current_run_number}\")\n\n    retrain_reason\
@@ -454,8 +454,8 @@ deploymentSpec:
           \            if line.startswith(\"fraudex_fraud_recall \"):\n          \
           \      recall = float(line.split(\" \")[1])\n            if 'fraudex_feature_drift_score{feature=\"\
           TransactionAmt\"}' in line:\n                drift_transactionamt = float(line.split(\"\
-          \ \")[1])\n\n        print(f\"\\nCurrent metrics from Prometheus:\")\n \
-          \       print(f\"  Fraud recall            : {recall}\")\n        print(f\"\
+          \ \")[1])\n\n        print(\"\\nCurrent metrics from Prometheus:\")\n  \
+          \      print(f\"  Fraud recall            : {recall}\")\n        print(f\"\
           \  TransactionAmt drift    : {drift_transactionamt}\")\n\n        # Trigger\
           \ 1: Performance drop\n        if recall is not None and recall < recall_threshold:\n\
           \            retrain_reason = f\"PERFORMANCE_DROP (recall={recall:.4f} <\

@@ -497,9 +497,9 @@ def retraining_decision(
 ):
     import requests
 
-    print("\n" + "="*50)
+    print("\n" + "=" * 50)
     print("RETRAINING STRATEGY: HYBRID")
-    print("="*50)
+    print("=" * 50)
     print(f"  Recall threshold        : {recall_threshold}")
     print(f"  Drift threshold         : {drift_threshold}")
     print(f"  Periodic interval       : every {max_runs_since_retrain} runs")
@@ -520,7 +520,7 @@ def retraining_decision(
             if 'fraudex_feature_drift_score{feature="TransactionAmt"}' in line:
                 drift_transactionamt = float(line.split(" ")[1])
 
-        print(f"\nCurrent metrics from Prometheus:")
+        print("\nCurrent metrics from Prometheus:")
         print(f"  Fraud recall            : {recall}")
         print(f"  TransactionAmt drift    : {drift_transactionamt}")
 
