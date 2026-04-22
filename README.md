@@ -104,7 +104,7 @@ cd Fraudex-K8
 uv sync
 ```
 
-For full setup instructions: EC2 provisioning, k3s, Kubeflow, monitoring stack, CI/CD secrets, persistent services and teardown, see [MANUAL.md](MANUAL.md).
+For full setup instructions: EC2 provisioning, k3s, Kubeflow, monitoring stack, CI/CD secrets, persistent services and teardown, see [MANUAL.md](docs/MANUAL.md).
 
 ---
 
