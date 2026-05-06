@@ -9,7 +9,7 @@
 [![k3s](https://img.shields.io/badge/k3s-1.34.6-blue)](https://k3s.io)
 [![Prometheus](https://img.shields.io/badge/Prometheus-2.51.0-E6522C?logo=prometheus&logoColor=white)](https://prometheus.io)
 [![Grafana](https://img.shields.io/badge/Grafana-13.0-F46800?logo=grafana&logoColor=white)](https://grafana.com)
-[![License](https://img.shields.io/badge/License-MIT-green)](LICENSE)
+[![CI/CD](https://github.com/muhammadhaider02/Fraudex-K8/actions/workflows/ci-cd.yml/badge.svg)](https://github.com/muhammadhaider02/Fraudex-K8/actions/workflows/ci-cd.yml)
 
 An end-to-end MLOps system for real-time fraud detection on the IEEE CIS dataset. Covers the full production lifecycle: automated pipeline orchestration on Kubernetes, CI/CD with GitHub Actions, drift-aware retraining and live observability via Prometheus and Grafana.
 
@@ -27,7 +27,6 @@ An end-to-end MLOps system for real-time fraud detection on the IEEE CIS dataset
 - [Monitoring](#monitoring)
 - [Inference API](#inference-api)
 - [Project Structure](#project-structure)
-- [License](#license)
 
 ---
 
@@ -194,9 +193,3 @@ Fraudex-K8/
 ├── pyproject.toml
 └── README.md
 ```
-
----
-
-## License
-
-For educational and research use.
